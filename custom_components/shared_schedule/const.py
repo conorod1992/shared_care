@@ -1,0 +1,23 @@
+"""Constants for the Shared Schedule integration."""
+
+DOMAIN = "shared_schedule"
+PLATFORMS = ["sensor", "binary_sensor"]
+
+CONF_PARTY_A = "party_a"
+CONF_PARTY_B = "party_b"
+CONF_CURRENT_PARTY = "current_party"
+CONF_ANCHOR_DATE = "anchor_date"
+CONF_RECURRENCE_WEEKS = "recurrence_weeks"
+CONF_WEEKDAY = "weekday"
+CONF_HANDOVER_TIME = "handover_time"
+CONF_COUNTRY = "country"
+CONF_SHIFT_HOLIDAYS = "shift_public_holidays"
+
+PARTY_A = "a"
+PARTY_B = "b"
+
+SERVICE_SET_OVERRIDE = "set_handover_override"
+SERVICE_CLEAR_OVERRIDE = "clear_handover_override"
+SERVICE_SET_CURRENT_PARTY = "set_current_party"
+SERVICE_COMPLETE_HANDOVER = "complete_handover"
+SERVICE_SHIFT_SERIES = "shift_series"
