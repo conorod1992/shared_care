@@ -1,0 +1,11 @@
+{
+  "domain": "shared_schedule",
+  "name": "Shared Schedule",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/conorod1992/shared_care",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "requirements": ["holidays==0.101"],
+  "version": "1.0.0"
+}

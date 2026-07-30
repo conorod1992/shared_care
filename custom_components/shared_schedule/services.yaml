@@ -1,0 +1,62 @@
+set_handover_override:
+  name: Set handover override
+  description: Move only the next handover without changing the recurring cadence.
+  target:
+    entity:
+      integration: shared_schedule
+      domain: sensor
+  fields:
+    datetime:
+      name: Date and time
+      required: true
+      selector:
+        datetime:
+
+clear_handover_override:
+  name: Clear handover override
+  description: Restore the holiday-adjusted time for the next handover.
+  target:
+    entity:
+      integration: shared_schedule
+      domain: sensor
+
+set_current_party:
+  name: Set current party
+  description: Correct which party currently has responsibility.
+  target:
+    entity:
+      integration: shared_schedule
+      domain: sensor
+  fields:
+    party:
+      name: Party
+      required: true
+      selector:
+        select:
+          options:
+            - label: Party A
+              value: a
+            - label: Party B
+              value: b
+
+complete_handover:
+  name: Complete handover
+  description: Switch party now and advance to the next base occurrence.
+  target:
+    entity:
+      integration: shared_schedule
+      domain: sensor
+
+shift_series:
+  name: Shift recurring series
+  description: Intentionally replace the next base occurrence and recurring cadence anchor.
+  target:
+    entity:
+      integration: shared_schedule
+      domain: sensor
+  fields:
+    datetime:
+      name: New base date and time
+      required: true
+      selector:
+        datetime:

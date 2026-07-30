@@ -1,0 +1,59 @@
+{
+  "title": "Shared Schedule",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create a shared schedule",
+        "description": "The anchor date must fall on the selected weekday.",
+        "data": {
+          "name": "Schedule name",
+          "party_a": "Party A display name",
+          "party_b": "Party B display name",
+          "current_party": "Current party",
+          "anchor_date": "Reference handover date",
+          "recurrence_weeks": "Recurrence interval (weeks)",
+          "weekday": "Default weekday",
+          "handover_time": "Default handover time",
+          "country": "Holiday country code",
+          "shift_public_holidays": "Move public-holiday handovers to the following day"
+        }
+      }
+    },
+    "error": {
+      "weekday_mismatch": "The reference date does not fall on the selected weekday",
+      "invalid_date": "Enter a valid reference date",
+      "unsupported_country": "This holiday country code is not supported",
+      "party_name_required": "Both party display names are required"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit shared schedule",
+        "data": {
+          "party_a": "Party A display name",
+          "party_b": "Party B display name",
+          "recurrence_weeks": "Recurrence interval (weeks)",
+          "country": "Holiday country code",
+          "shift_public_holidays": "Move public-holiday handovers to the following day"
+        }
+      }
+    },
+    "error": {
+      "unsupported_country": "This holiday country code is not supported",
+      "party_name_required": "Both party display names are required"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": { "name": "Status" },
+      "next_handover": { "name": "Next handover" }
+    },
+    "binary_sensor": {
+      "with_party_a": { "name": "With Party A" },
+      "with_party_b": { "name": "With Party B" },
+      "handover_today": { "name": "Handover today" },
+      "handover_tomorrow": { "name": "Handover tomorrow" }
+    }
+  }
+}
