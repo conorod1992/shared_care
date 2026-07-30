@@ -6,6 +6,17 @@ and one-off overrides, so moving one handover never silently moves the series.
 
 ## Install
 
+### HACS
+
+1. In HACS, open **Integrations**, select the three-dot menu, and choose
+   **Custom repositories**.
+2. Add `https://github.com/conorod1992/shared_care` with the category
+   **Integration**.
+3. Download **Shared Schedule**, restart Home Assistant, then add it from
+   **Settings → Devices & services → Add integration**.
+
+### Manual installation
+
 Copy `custom_components/shared_schedule` into the matching `custom_components`
 directory in your Home Assistant configuration, restart Home Assistant, then go
 to **Settings → Devices & services → Add integration → Shared Schedule**.
@@ -99,4 +110,3 @@ series shifts, and daylight-saving changes.
 python -m pytest
 python -m ruff check .
 ```
-
