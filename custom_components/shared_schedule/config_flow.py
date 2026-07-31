@@ -114,13 +114,18 @@ def _validate(data: dict[str, Any]) -> dict[str, str]:
             errors[CONF_ANCHOR_DATE] = "weekday_mismatch"
     except (TypeError, ValueError):
         errors[CONF_ANCHOR_DATE] = "invalid_date"
-    try:
-        holidays.country_holidays(data[CONF_COUNTRY])
-    except (KeyError, NotImplementedError):
-        errors[CONF_COUNTRY] = "unsupported_country"
     if not data[CONF_PARTY_A].strip() or not data[CONF_PARTY_B].strip():
         errors["base"] = "party_name_required"
     return errors
+
+
+async def _async_validate_country(hass, country: str) -> bool:
+    """Validate a holiday country without importing calendars on the event loop."""
+    try:
+        await hass.async_add_executor_job(holidays.country_holidays, country)
+    except (KeyError, NotImplementedError):
+        return False
+    return True
 
 
 class SharedScheduleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -135,6 +140,8 @@ class SharedScheduleConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = _normalize(user_input)
             errors = _validate(user_input)
+            if not await _async_validate_country(self.hass, user_input[CONF_COUNTRY]):
+                errors[CONF_COUNTRY] = "unsupported_country"
             if not errors:
                 return self.async_create_entry(
                     title=user_input[CONF_NAME], data=user_input
@@ -177,9 +184,7 @@ class SharedScheduleOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_COUNTRY] = user_input[CONF_COUNTRY].strip().upper()
-            try:
-                holidays.country_holidays(user_input[CONF_COUNTRY])
-            except (KeyError, NotImplementedError):
+            if not await _async_validate_country(self.hass, user_input[CONF_COUNTRY]):
                 errors[CONF_COUNTRY] = "unsupported_country"
             if (
                 not user_input[CONF_PARTY_A].strip()

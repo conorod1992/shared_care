@@ -64,10 +64,6 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             shift_public_holidays=data[CONF_SHIFT_HOLIDAYS],
         )
 
-    def _holiday_checker(self):
-        calendar = holidays.country_holidays(self.settings_data[CONF_COUNTRY])
-        return calendar.__contains__
-
     def _local_datetime(self, value: datetime) -> datetime:
         if value.tzinfo is None:
             return value.replace(tzinfo=self._tz)
@@ -86,6 +82,9 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
     async def async_initialize(self) -> None:
         """Load state, reconcile downtime, publish, and arm a timer."""
         stored = await self._store.async_load()
+        calendar = await self.hass.async_add_executor_job(
+            holidays.country_holidays, self.settings_data[CONF_COUNTRY]
+        )
         now = self._now()
         if stored:
             next_base = self._local_datetime(
@@ -106,7 +105,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                 current_party=self.settings_data[CONF_CURRENT_PARTY],
                 next_base=self._initial_base(now),
             )
-        self.model = ScheduleModel(self._settings(), state, self._holiday_checker())
+        self.model = ScheduleModel(self._settings(), state, calendar.__contains__)
         completed = self.model.reconcile(now)
         if completed:
             _LOGGER.info("Reconciled %s missed handover(s)", completed)
