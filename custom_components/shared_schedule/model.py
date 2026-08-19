@@ -7,7 +7,7 @@ and manual override.  This is the central invariant of the integration.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .const import PARTY_A, PARTY_B
@@ -37,6 +37,7 @@ class ScheduleState:
     current_party: str
     next_base: datetime
     override: datetime | None = None
+    date_overrides: dict[str, str] = field(default_factory=dict)
 
 
 class ScheduleModel:
@@ -54,11 +55,18 @@ class ScheduleModel:
             raise ValueError("override must be timezone-aware")
         if state.current_party not in (PARTY_A, PARTY_B):
             raise ValueError("current_party must be 'a' or 'b'")
+        if any(
+            party not in (PARTY_A, PARTY_B) for party in state.date_overrides.values()
+        ):
+            raise ValueError("date override parties must be 'a' or 'b'")
+        for value in state.date_overrides:
+            date.fromisoformat(value)
         if settings.recurrence_weeks < 1:
             raise ValueError("recurrence_weeks must be at least 1")
         self.settings = settings
         self.state = state
         self._is_holiday = is_holiday
+        self._prune_redundant_date_overrides()
 
     @property
     def base_handover(self) -> datetime:
@@ -100,6 +108,90 @@ class ScheduleModel:
             else self.settings.party_b
         )
 
+    def party_name(self, party: str) -> str:
+        """Return the configured display name for a party key."""
+        if party == PARTY_A:
+            return self.settings.party_a
+        if party == PARTY_B:
+            return self.settings.party_b
+        raise ValueError("party must be 'a' or 'b'")
+
+    def normal_party_for_date(self, value: date) -> str:
+        """Return ownership from the recurring cadence for a calendar date.
+
+        Date ownership changes on each base handover date.  This calculation is
+        deliberately independent of public-holiday, handover, and date overrides.
+        """
+        interval_days = self.settings.interval.days
+        current_period_start = self.base_handover.date() - self.settings.interval
+        period_offset = (value - current_period_start).days // interval_days
+        if period_offset % 2:
+            return self.next_party_key
+        return self.state.current_party
+
+    def party_for_date(self, value: date) -> str:
+        """Return the explicit date owner or the normal scheduled owner."""
+        return self.state.date_overrides.get(
+            value.isoformat(), self.normal_party_for_date(value)
+        )
+
+    def actual_party_at(self, value: datetime) -> str:
+        """Return the current time-based owner, including today's date override."""
+        return self.state.date_overrides.get(
+            value.date().isoformat(), self.state.current_party
+        )
+
+    def set_date_overrides(self, values: list[date], party: str) -> None:
+        """Set one or many date overrides without changing the cadence.
+
+        Selecting the party that normally owns a date removes any existing
+        exception instead of persisting a redundant override.
+        """
+        if party not in (PARTY_A, PARTY_B):
+            raise ValueError("party must be 'a' or 'b'")
+        for value in values:
+            key = value.isoformat()
+            if self.normal_party_for_date(value) == party:
+                self.state.date_overrides.pop(key, None)
+            else:
+                self.state.date_overrides[key] = party
+
+    def _prune_redundant_date_overrides(self) -> None:
+        """Discard exceptions that now match normal cadence ownership."""
+        redundant = [
+            value
+            for value, party in self.state.date_overrides.items()
+            if self.normal_party_for_date(date.fromisoformat(value)) == party
+        ]
+        for value in redundant:
+            self.state.date_overrides.pop(value)
+
+    def remove_date_overrides(self, values: list[date]) -> None:
+        """Remove one or many date overrides."""
+        for value in values:
+            self.state.date_overrides.pop(value.isoformat(), None)
+
+    def calendar(self, start: date, days: int) -> list[dict[str, object]]:
+        """Return normal and actual ownership for a range of dates."""
+        if days < 1:
+            raise ValueError("days must be at least 1")
+        result = []
+        for offset in range(days):
+            value = start + timedelta(days=offset)
+            normal_party = self.normal_party_for_date(value)
+            actual_party = self.party_for_date(value)
+            result.append(
+                {
+                    "date": value.isoformat(),
+                    "normal_party": normal_party,
+                    "normal_party_name": self.party_name(normal_party),
+                    "party": actual_party,
+                    "party_name": self.party_name(actual_party),
+                    "overridden": value.isoformat() in self.state.date_overrides,
+                }
+            )
+        return result
+
     def set_override(self, value: datetime, now: datetime) -> None:
         """Override only the active occurrence.
 
@@ -121,6 +213,7 @@ class ScheduleModel:
         if party not in (PARTY_A, PARTY_B):
             raise ValueError("party must be 'a' or 'b'")
         self.state.current_party = party
+        self._prune_redundant_date_overrides()
 
     def complete_handover(self) -> None:
         """Complete exactly one occurrence, preserving the base cadence."""
@@ -134,6 +227,7 @@ class ScheduleModel:
             raise ValueError("new base must be timezone-aware")
         self.state.next_base = new_base
         self.state.override = None
+        self._prune_redundant_date_overrides()
 
     def reconcile(self, now: datetime) -> int:
         """Catch up in O(1), returning the number of completed handovers."""
@@ -170,8 +264,11 @@ class ScheduleModel:
         """Return entity-friendly derived state."""
         effective = self.effective_handover
         days = (effective.date() - now.date()).days
+        actual_party = self.actual_party_at(now)
         return {
             "current_party": self.current_party_name,
+            "actual_current_party": self.party_name(actual_party),
+            "actual_current_party_key": actual_party,
             "next_party": self.next_party_name,
             "next_handover": effective.isoformat(),
             "base_handover": self.base_handover.isoformat(),
@@ -186,4 +283,5 @@ class ScheduleModel:
             "shifted_for_public_holiday": self.shifted_for_public_holiday,
             "overridden": self.state.override is not None,
             "recurrence_weeks": self.settings.recurrence_weeks,
+            "date_overrides": dict(sorted(self.state.date_overrides.items())),
         }

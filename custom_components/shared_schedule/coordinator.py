@@ -55,6 +55,16 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
     def _now(self) -> datetime:
         return dt_util.utcnow().astimezone(self._tz)
 
+    @property
+    def today(self) -> date:
+        """Return today's date in Home Assistant's configured timezone."""
+        return self._now().date()
+
+    @property
+    def actual_current_party(self) -> str:
+        """Return current ownership including a date override for today."""
+        return self.model.actual_party_at(self._now())
+
     def _settings(self) -> ScheduleSettings:
         data = self.settings_data
         return ScheduleSettings(
@@ -99,6 +109,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                     if override
                     else None
                 ),
+                date_overrides=dict(stored.get("date_overrides", {})),
             )
         else:
             state = ScheduleState(
@@ -121,6 +132,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                     if self.model.state.override
                     else None
                 ),
+                "date_overrides": dict(sorted(self.model.state.date_overrides.items())),
             }
         )
 
@@ -155,6 +167,24 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         async with self._lock:
             self.model.clear_override()
             await self._async_commit()
+
+    async def async_set_date_overrides(
+        self, values: list[date], party: str
+    ) -> None:
+        """Add or replace one or many date ownership overrides."""
+        async with self._lock:
+            self.model.set_date_overrides(values, party)
+            await self._async_commit()
+
+    async def async_remove_date_overrides(self, values: list[date]) -> None:
+        """Remove one or many date ownership overrides."""
+        async with self._lock:
+            self.model.remove_date_overrides(values)
+            await self._async_commit()
+
+    def calendar(self, start: date, days: int) -> list[dict[str, object]]:
+        """Return an ownership calendar for frontend consumers."""
+        return self.model.calendar(start, days)
 
     async def async_set_current_party(self, party: str) -> None:
         async with self._lock:

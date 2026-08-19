@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration for a simple alternating shared-care
 schedule. It keeps the recurring cadence separate from public-holiday changes
-and one-off overrides, so moving one handover never silently moves the series.
+and one-off overrides, so exceptions never silently move the series.
 
 ## Install
 
@@ -88,6 +88,25 @@ data:
 
 This is deliberately different from a one-off override.
 
+## Schedule panel and date overrides
+
+The integration adds a **Shared Schedule** page to the Home Assistant sidebar.
+It is an admin-only native panel using Home Assistant's authenticated WebSocket
+connection; it does not run or expose a separate web server.
+
+The **Schedule** view shows the current actual owner, the normal and effective
+next handovers, and six weeks of normal ownership. Choose a party and select one
+date, or two endpoints for a contiguous range. Dates already belonging to that
+party on the normal cadence are disabled. Existing exceptions are outlined and
+can be removed or changed by selecting them.
+
+Date overrides apply only to the selected ISO calendar dates. They do not alter
+the recurring cadence, public-holiday adjustment, or the separate next-handover
+override. Redundant overrides are not stored when the selected party already
+owns the date normally. The **Overrides** view groups upcoming exceptions for
+quick editing or deletion. The **Settings** view summarizes the useful schedule
+configuration and links to Home Assistant's standard integration options.
+
 ## Restart and time handling
 
 All stored datetimes are restored into Home Assistant's configured timezone.
@@ -96,15 +115,15 @@ several complete recurrence periods elapsed while Home Assistant was offline,
 the model advances them mathematically and applies the correct odd/even party
 change rather than replaying each event.
 
-Holiday calculation uses the maintained `holidays` Python package. The order is
-always base recurrence → public-holiday adjustment → manual override → effective
-handover.
+Holiday calculation uses the maintained `holidays` Python package. Handover
+timing remains base recurrence → public-holiday adjustment → manual override →
+effective handover. Date ownership overrides are evaluated separately.
 
 ## Development
 
 The schedule model is pure Python and its tests cover normal and holiday
 handovers, overrides, restart reconciliation, missed periods, manual correction,
-series shifts, and daylight-saving changes.
+series shifts, date ownership, persistence, and daylight-saving changes.
 
 ```text
 python -m pytest
