@@ -37,7 +37,10 @@ def test_frontend_panel_asset_is_packaged() -> None:
         / "shared-schedule-panel.js"
     )
     assert panel.is_file()
-    assert "shared_schedule/date_overrides/set" in panel.read_text(encoding="utf-8")
+    contents = panel.read_text(encoding="utf-8")
+    assert "shared_schedule/date_overrides/set" in contents
+    assert "shared_schedule/party_colors/set" in contents
+    assert "Override ·" in contents
 
 
 def test_date_overrides_are_loaded_and_saved_through_store() -> None:
@@ -46,3 +49,11 @@ def test_date_overrides_are_loaded_and_saved_through_store() -> None:
     ).read_text(encoding="utf-8")
     assert 'stored.get("date_overrides", {})' in coordinator
     assert '"date_overrides": dict(sorted(' in coordinator
+
+
+def test_party_colours_are_loaded_and_saved_through_store() -> None:
+    coordinator = (
+        ROOT / "custom_components" / "shared_schedule" / "coordinator.py"
+    ).read_text(encoding="utf-8")
+    assert 'stored.get("display_settings", {})' in coordinator
+    assert '"display_settings": dict(self.display_settings)' in coordinator

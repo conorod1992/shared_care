@@ -12,7 +12,13 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, PARTY_A, PARTY_B
+from .const import (
+    CONF_PARTY_A_COLOR,
+    CONF_PARTY_B_COLOR,
+    DOMAIN,
+    PARTY_A,
+    PARTY_B,
+)
 from .coordinator import SharedScheduleCoordinator
 
 PANEL_URL_PATH = "shared-schedule"
@@ -41,6 +47,7 @@ async def async_setup_frontend(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_schedule)
     websocket_api.async_register_command(hass, websocket_set_date_overrides)
     websocket_api.async_register_command(hass, websocket_remove_date_overrides)
+    websocket_api.async_register_command(hass, websocket_set_party_colors)
 
 
 def _coordinators(hass: HomeAssistant) -> dict[str, SharedScheduleCoordinator]:
@@ -64,7 +71,7 @@ def _payload(
 ) -> dict[str, Any]:
     model = coordinator.model
     actual_party = coordinator.actual_current_party
-    settings = coordinator.settings_data
+    settings = {**coordinator.settings_data, **coordinator.display_settings}
     return {
         "entry_id": coordinator.entry.entry_id,
         "title": coordinator.entry.title,
@@ -171,4 +178,33 @@ async def websocket_remove_date_overrides(
         )
         return
     await coordinator.async_remove_date_overrides(msg["dates"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/party_colors/set",
+        vol.Required("entry_id"): str,
+        vol.Required(CONF_PARTY_A_COLOR): vol.Match(r"^#[0-9a-fA-F]{6}$"),
+        vol.Required(CONF_PARTY_B_COLOR): vol.Match(r"^#[0-9a-fA-F]{6}$"),
+    }
+)
+@websocket_api.async_response
+async def websocket_set_party_colors(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Persist display-only party colours."""
+    entry_id = msg.get("entry_id")
+    coordinator = _coordinators(hass).get(entry_id)
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"
+        )
+        return
+    await coordinator.async_set_party_colors(
+        msg[CONF_PARTY_A_COLOR], msg[CONF_PARTY_B_COLOR]
+    )
     connection.send_result(msg["id"])

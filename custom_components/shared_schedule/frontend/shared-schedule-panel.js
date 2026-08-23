@@ -111,7 +111,7 @@ class SharedSchedulePanel extends HTMLElement {
     const today = day.date === isoDate(new Date());
     const normalMatches = day.normal_party === this._party;
     const disabled = this._party && normalMatches && !day.overridden;
-    const classes = ["day", this._partyClass(day.normal_party)];
+    const classes = ["day", this._partyClass(day.party)];
     if (day.overridden) classes.push("overridden");
     if (selected) classes.push("selected");
     if (disabled) classes.push("disabled");
@@ -121,10 +121,10 @@ class SharedSchedulePanel extends HTMLElement {
         aria-label="${escapeHtml(formatDate(day.date, { dateStyle: "full" }))}: ${escapeHtml(day.party_name)}"
         ${disabled ? "disabled" : ""}>
         <span class="date-number">${parseDate(day.date).getDate()}</span>
-        <span class="owner normal-owner">${escapeHtml(day.normal_party_name)}</span>
+        <span class="owner owner-name">${escapeHtml(day.party_name)}</span>
         ${
           day.overridden
-            ? `<span class="owner actual-owner">Override: ${escapeHtml(day.party_name)}</span>`
+            ? `<span class="owner override-detail">Override · ${escapeHtml(day.normal_party_name)} → ${escapeHtml(day.party_name)}</span>`
             : ""
         }
       </button>`;
@@ -201,14 +201,14 @@ class SharedSchedulePanel extends HTMLElement {
             <h2>Upcoming six weeks</h2>
             <p>${
               this._party
-                ? `Dates normally belonging to ${escapeHtml(schedule.parties[this._party])} are muted.`
-                : "Choose a party to begin selecting dates."
+                ? `Dates normally belonging to ${escapeHtml(schedule.parties[this._party])} are muted. Cards always show the actual owner.`
+                : "Choose a party to begin selecting dates. Cards show the actual owner."
             }</p>
           </div>
           <div class="legend">
-            <span><i class="swatch party-a"></i>${escapeHtml(schedule.parties.a)}</span>
-            <span><i class="swatch party-b"></i>${escapeHtml(schedule.parties.b)}</span>
-            <span><i class="swatch override-swatch"></i>Override</span>
+            <span><i class="swatch party-a"></i>${escapeHtml(schedule.parties.a)} · actual owner</span>
+            <span><i class="swatch party-b"></i>${escapeHtml(schedule.parties.b)} · actual owner</span>
+            <span><i class="swatch override-swatch"></i>Override · normal schedule changed</span>
           </div>
         </div>
         <div class="calendar">
@@ -287,14 +287,29 @@ class SharedSchedulePanel extends HTMLElement {
         .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
         .join("")}</dl>
       <button class="primary" data-action="open-settings">Open integration settings</button>
+    </section>
+    <section class="card colour-card">
+      <div><h2>Party colours</h2><p>Colours support the party names and ownership labels; they are never the only indicator.</p></div>
+      <div class="colour-fields">
+        <label>${escapeHtml(schedule.parties.a)}
+          <input type="color" data-field="party-a-color" value="${escapeHtml(settings.party_a_color)}">
+        </label>
+        <label>${escapeHtml(schedule.parties.b)}
+          <input type="color" data-field="party-b-color" value="${escapeHtml(settings.party_b_color)}">
+        </label>
+      </div>
+      <button class="primary" data-action="save-party-colours">Save colours</button>
     </section>`;
   }
 
   _render() {
     if (!this.shadowRoot) return;
     const schedule = this._schedule;
+    const partyColours = schedule
+      ? `--party-a-color:${escapeHtml(schedule.settings.party_a_color)}; --party-b-color:${escapeHtml(schedule.settings.party_b_color)};`
+      : "";
     this.shadowRoot.innerHTML = `<style>${this._styles()}</style>
-      <div class="page">
+      <div class="page" style="${partyColours}">
         <header class="topbar"><div><span class="eyebrow">Shared Schedule</span><h1>${escapeHtml(schedule?.title || "Schedule")}</h1></div>
           ${
             this._data?.length > 1
@@ -433,6 +448,10 @@ class SharedSchedulePanel extends HTMLElement {
         const dates = action === "remove-one" ? [element.dataset.date] : element.dataset.dates.split(",");
         await this._removeOverrides(dates);
         this._editingDate = undefined;
+      } else if (action === "save-party-colours") {
+        const partyAColor = this.shadowRoot.querySelector('[data-field="party-a-color"]').value;
+        const partyBColor = this.shadowRoot.querySelector('[data-field="party-b-color"]').value;
+        await this._setPartyColors(partyAColor, partyBColor);
       }
       await this._load();
     } catch (error) {
@@ -458,11 +477,20 @@ class SharedSchedulePanel extends HTMLElement {
     });
   }
 
+  _setPartyColors(partyAColor, partyBColor) {
+    return this._call({
+      type: "shared_schedule/party_colors/set",
+      entry_id: this._entryId,
+      party_a_color: partyAColor,
+      party_b_color: partyBColor,
+    });
+  }
+
   _styles() {
     return `
       :host { display:block; min-height:100%; color:var(--primary-text-color); background:var(--primary-background-color); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
       * { box-sizing:border-box; }
-      button, select { font:inherit; }
+      button, select, input { font:inherit; }
       button { cursor:pointer; }
       .page { max-width:1180px; margin:0 auto; padding:28px 24px 56px; }
       .topbar { display:flex; justify-content:space-between; align-items:end; gap:20px; margin-bottom:20px; }
@@ -490,8 +518,8 @@ class SharedSchedulePanel extends HTMLElement {
       .legend { display:flex; flex-wrap:wrap; gap:12px; font-size:.78rem; color:var(--secondary-text-color); }
       .legend span { display:flex; align-items:center; gap:5px; }
       .swatch { width:12px; height:12px; border-radius:4px; display:inline-block; }
-      .party-a { --party-color:#3f8fc9; --party-soft:color-mix(in srgb, #3f8fc9 16%, var(--card-background-color)); }
-      .party-b { --party-color:#b06ab3; --party-soft:color-mix(in srgb, #b06ab3 16%, var(--card-background-color)); }
+      .party-a { --party-color:var(--party-a-color); --party-soft:color-mix(in srgb, var(--party-a-color) 16%, var(--card-background-color)); }
+      .party-b { --party-color:var(--party-b-color); --party-soft:color-mix(in srgb, var(--party-b-color) 16%, var(--card-background-color)); }
       .swatch.party-a, .swatch.party-b { background:var(--party-color); }
       .override-swatch { border:2px solid var(--warning-color, #f2a900); background:transparent; }
       .calendar { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:7px; }
@@ -504,8 +532,8 @@ class SharedSchedulePanel extends HTMLElement {
       .day.disabled { opacity:.42; cursor:not-allowed; filter:saturate(.4); }
       .date-number { width:27px; height:27px; display:grid; place-items:center; font-weight:700; }
       .owner { font-size:.72rem; line-height:1.25; white-space:normal; }
-      .normal-owner { color:var(--secondary-text-color); }
-      .actual-owner { color:var(--warning-color, #c77800); font-weight:700; }
+      .owner-name { font-weight:700; }
+      .override-detail { color:var(--warning-color, #c77800); font-size:.62rem; font-weight:700; }
       .selection-bar, .override-editor { position:sticky; bottom:16px; z-index:2; margin-top:14px; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; gap:18px; box-shadow:0 10px 30px rgba(0,0,0,.18); }
       .selection-bar p, .override-editor p { margin:0; color:var(--primary-text-color); }
       .selection-bar div, .override-editor > div:last-child { display:flex; gap:8px; flex-shrink:0; }
@@ -515,7 +543,7 @@ class SharedSchedulePanel extends HTMLElement {
       button.danger { border:1px solid var(--error-color); background:transparent; color:var(--error-color); }
       .override-list { display:flex; flex-direction:column; }
       .override-list + * { margin-top:12px; }
-      .card:has(.override-list), .settings-card, .empty, .error { padding:22px; }
+      .card:has(.override-list), .settings-card, .colour-card, .empty, .error { padding:22px; }
       .override-row { display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:12px; padding:15px 0; border-top:1px solid var(--divider-color); }
       .override-row:first-child { border-top:0; }
       .override-row div { display:flex; flex-direction:column; gap:3px; }
@@ -526,6 +554,11 @@ class SharedSchedulePanel extends HTMLElement {
       .settings-card dl div { display:flex; justify-content:space-between; gap:20px; padding:10px 0; border-bottom:1px solid var(--divider-color); }
       dt { color:var(--secondary-text-color); } dd { margin:0; text-align:right; font-weight:600; }
       .settings-card > button { grid-column:2; justify-self:end; }
+      .colour-card { display:grid; grid-template-columns:1fr 1.4fr auto; gap:20px; align-items:end; margin-top:14px; }
+      .colour-card p { margin-bottom:0; }
+      .colour-fields { display:flex; gap:14px; }
+      .colour-fields label { display:flex; align-items:center; gap:8px; font-weight:700; }
+      .colour-fields input { width:44px; height:34px; padding:2px; border:1px solid var(--divider-color); border-radius:8px; background:var(--card-background-color); }
       select { padding:9px 12px; border:1px solid var(--divider-color); border-radius:9px; background:var(--card-background-color); color:var(--primary-text-color); }
       @media (max-width:780px) {
         .page { padding:18px 10px 40px; }
@@ -537,13 +570,15 @@ class SharedSchedulePanel extends HTMLElement {
         .calendar { gap:3px; }
         .day { min-height:70px; padding:5px 3px; border-radius:8px; }
         .owner { font-size:.58rem; overflow-wrap:anywhere; }
-        .actual-owner { font-size:.55rem; }
+        .override-detail { font-size:.52rem; }
         .selection-bar, .override-editor { bottom:6px; }
         .selection-bar div, .override-editor > div:last-child { flex-wrap:wrap; }
         .override-row { grid-template-columns:auto 1fr auto; }
         .override-row button:last-child { grid-column:3; }
         .settings-card { grid-template-columns:1fr; }
         .settings-card > button { grid-column:1; justify-self:stretch; }
+        .colour-card { grid-template-columns:1fr; }
+        .colour-card > button { justify-self:stretch; }
       }
     `;
   }

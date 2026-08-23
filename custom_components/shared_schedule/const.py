@@ -12,6 +12,11 @@ CONF_WEEKDAY = "weekday"
 CONF_HANDOVER_TIME = "handover_time"
 CONF_COUNTRY = "country"
 CONF_SHIFT_HOLIDAYS = "shift_public_holidays"
+CONF_PARTY_A_COLOR = "party_a_color"
+CONF_PARTY_B_COLOR = "party_b_color"
+
+DEFAULT_PARTY_A_COLOR = "#3f8fc9"
+DEFAULT_PARTY_B_COLOR = "#b06ab3"
 
 PARTY_A = "a"
 PARTY_B = "b"
