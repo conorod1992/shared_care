@@ -273,6 +273,12 @@ class SharedSchedulePanel extends HTMLElement {
 
   _renderSettings(schedule) {
     const settings = schedule.settings;
+    const sourceLabels = {
+      automatic: "Automatic holiday calendar",
+      manual_fallback: "Manual fallback dates",
+      unavailable: "Unavailable",
+      disabled: "Disabled",
+    };
     const rows = [
       ["Party A", settings.party_a],
       ["Party B", settings.party_b],
@@ -280,6 +286,7 @@ class SharedSchedulePanel extends HTMLElement {
       ["Handover time", settings.handover_time],
       ["Holiday country", settings.country],
       ["Public-holiday adjustment", settings.shift_public_holidays ? "Enabled" : "Disabled"],
+      ["Holiday data", sourceLabels[schedule.holiday_status.source]],
     ];
     return `<section class="card settings-card">
       <div><h2>Schedule settings</h2><p>Edit these through Home Assistant’s integration options.</p></div>
@@ -287,7 +294,40 @@ class SharedSchedulePanel extends HTMLElement {
         .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
         .join("")}</dl>
       <button class="primary" data-action="open-settings">Open integration settings</button>
+    </section>
+    <section class="card fallback-card" id="fallback-holidays">
+      <div><h2>Fallback public holidays</h2>
+        <p>These dates are used only when automatic holiday data is unavailable.</p></div>
+      <div class="fallback-form">
+        <label>Date<input type="date" data-field="fallback-date" required></label>
+        <label>Display name <small>Optional</small><input type="text" data-field="fallback-name" maxlength="120" placeholder="e.g. August bank holiday"></label>
+        <button class="primary" data-action="add-fallback">Add fallback date</button>
+      </div>
+      <div class="fallback-list">
+        ${schedule.fallback_holidays.length
+          ? schedule.fallback_holidays.map((holiday) => `<div class="fallback-row">
+              <div><strong>${escapeHtml(formatDate(holiday.date, { dateStyle: "long" }))}</strong>
+                ${holiday.name ? `<span>${escapeHtml(holiday.name)}</span>` : ""}</div>
+              <button class="danger" data-action="remove-fallback" data-date="${holiday.date}">Remove</button>
+            </div>`).join("")
+          : "<p class=\"empty-fallbacks\">No fallback dates have been added.</p>"}
+      </div>
     </section>`;
+  }
+
+  _holidayNotice(schedule) {
+    const source = schedule.holiday_status.source;
+    if (source === "manual_fallback") {
+      return `<section class="notice mild"><div><strong>Using fallback public-holiday dates</strong>
+        <p>Automatic holiday data is unavailable, so saved fallback dates are being used.</p></div>
+        <button class="secondary" data-action="manage-fallbacks">Manage dates</button></section>`;
+    }
+    if (source === "unavailable") {
+      return `<section class="notice warning"><div><strong>Public-holiday adjustments are unavailable</strong>
+        <p>Shared Schedule still works, but public-holiday adjustments cannot currently be made. Some handover dates may be inaccurate.</p></div>
+        <button class="primary" data-action="manage-fallbacks">Add fallback dates</button></section>`;
+    }
+    return "";
   }
 
   _render() {
@@ -308,7 +348,7 @@ class SharedSchedulePanel extends HTMLElement {
               ? `<section class="card error"><h2>Could not load the schedule</h2><p>${escapeHtml(this._error)}</p><button class="primary" data-action="retry">Try again</button></section>`
               : !schedule
                 ? `<section class="card empty"><h2>No loaded schedules</h2><p>Add or enable a Shared Schedule integration entry first.</p></section>`
-                : `${this._overview(schedule)}${this._tabs()}${
+                : `${this._overview(schedule)}${this._holidayNotice(schedule)}${this._tabs()}${
                     this._tab === "schedule"
                       ? this._renderSchedule(schedule)
                       : this._tab === "overrides"
@@ -414,6 +454,12 @@ class SharedSchedulePanel extends HTMLElement {
       window.dispatchEvent(new Event("location-changed"));
       return;
     }
+    if (action === "manage-fallbacks") {
+      this._tab = "settings";
+      this._render();
+      this.shadowRoot.querySelector('[data-field="fallback-date"]')?.focus();
+      return;
+    }
     if (action === "edit-group") {
       this._tab = "schedule";
       this._party = element.dataset.party;
@@ -433,6 +479,13 @@ class SharedSchedulePanel extends HTMLElement {
         const dates = action === "remove-one" ? [element.dataset.date] : element.dataset.dates.split(",");
         await this._removeOverrides(dates);
         this._editingDate = undefined;
+      } else if (action === "add-fallback") {
+        const dateInput = this.shadowRoot.querySelector('[data-field="fallback-date"]');
+        if (!dateInput.reportValidity()) return;
+        const name = this.shadowRoot.querySelector('[data-field="fallback-name"]').value.trim();
+        await this._setFallbackHoliday(dateInput.value, name);
+      } else if (action === "remove-fallback") {
+        await this._removeFallbackHoliday(element.dataset.date);
       }
       await this._load();
     } catch (error) {
@@ -458,11 +511,28 @@ class SharedSchedulePanel extends HTMLElement {
     });
   }
 
+  _setFallbackHoliday(date, name) {
+    return this._call({
+      type: "shared_schedule/fallback_holidays/set",
+      entry_id: this._entryId,
+      date,
+      ...(name ? { name } : {}),
+    });
+  }
+
+  _removeFallbackHoliday(date) {
+    return this._call({
+      type: "shared_schedule/fallback_holidays/remove",
+      entry_id: this._entryId,
+      date,
+    });
+  }
+
   _styles() {
     return `
       :host { display:block; min-height:100%; color:var(--primary-text-color); background:var(--primary-background-color); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
       * { box-sizing:border-box; }
-      button, select { font:inherit; }
+      button, select, input { font:inherit; }
       button { cursor:pointer; }
       .page { max-width:1180px; margin:0 auto; padding:28px 24px 56px; }
       .topbar { display:flex; justify-content:space-between; align-items:end; gap:20px; margin-bottom:20px; }
@@ -473,6 +543,10 @@ class SharedSchedulePanel extends HTMLElement {
       .overview { display:grid; grid-template-columns:1.15fr 1fr 1fr; gap:14px; }
       .overview article { padding:22px; min-height:130px; display:flex; flex-direction:column; }
       .overview strong { margin:auto 0 7px; font-size:1.22rem; }
+      .notice { margin-top:14px; padding:18px 20px; display:flex; align-items:center; justify-content:space-between; gap:20px; border-radius:14px; }
+      .notice p { margin:4px 0 0; }
+      .notice.mild { background:color-mix(in srgb, var(--primary-color) 8%, var(--card-background-color)); border:1px solid color-mix(in srgb, var(--primary-color) 35%, var(--divider-color)); }
+      .notice.warning { background:color-mix(in srgb, var(--warning-color, #f2a900) 12%, var(--card-background-color)); border:2px solid var(--warning-color, #f2a900); }
       .hero { background:linear-gradient(135deg, var(--primary-color), color-mix(in srgb, var(--primary-color) 72%, #171e3d)); color:var(--text-primary-color, white); border:0; }
       .hero span, .hero small { color:color-mix(in srgb, currentColor 75%, transparent); }
       small { color:var(--secondary-text-color); }
@@ -515,7 +589,7 @@ class SharedSchedulePanel extends HTMLElement {
       button.danger { border:1px solid var(--error-color); background:transparent; color:var(--error-color); }
       .override-list { display:flex; flex-direction:column; }
       .override-list + * { margin-top:12px; }
-      .card:has(.override-list), .settings-card, .empty, .error { padding:22px; }
+      .card:has(.override-list), .settings-card, .fallback-card, .empty, .error { padding:22px; }
       .override-row { display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:12px; padding:15px 0; border-top:1px solid var(--divider-color); }
       .override-row:first-child { border-top:0; }
       .override-row div { display:flex; flex-direction:column; gap:3px; }
@@ -526,12 +600,21 @@ class SharedSchedulePanel extends HTMLElement {
       .settings-card dl div { display:flex; justify-content:space-between; gap:20px; padding:10px 0; border-bottom:1px solid var(--divider-color); }
       dt { color:var(--secondary-text-color); } dd { margin:0; text-align:right; font-weight:600; }
       .settings-card > button { grid-column:2; justify-self:end; }
-      select { padding:9px 12px; border:1px solid var(--divider-color); border-radius:9px; background:var(--card-background-color); color:var(--primary-text-color); }
+      .fallback-card { margin-top:14px; }
+      .fallback-form { display:grid; grid-template-columns:1fr 1.5fr auto; gap:12px; align-items:end; margin:18px 0; }
+      .fallback-form label { display:flex; flex-direction:column; gap:6px; color:var(--secondary-text-color); font-size:.86rem; font-weight:600; }
+      .fallback-form label small { font-weight:400; }
+      .fallback-list { border-top:1px solid var(--divider-color); }
+      .fallback-row { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--divider-color); }
+      .fallback-row div { display:flex; flex-direction:column; gap:3px; }
+      .fallback-row span, .empty-fallbacks { color:var(--secondary-text-color); }
+      .empty-fallbacks { margin:16px 0 0; }
+      select, input { padding:9px 12px; border:1px solid var(--divider-color); border-radius:9px; background:var(--card-background-color); color:var(--primary-text-color); }
       @media (max-width:780px) {
         .page { padding:18px 10px 40px; }
         .overview { grid-template-columns:1fr; }
         .overview article { min-height:105px; }
-        .owner-picker, .calendar-heading, .selection-bar, .override-editor { align-items:stretch; flex-direction:column; }
+        .owner-picker, .calendar-heading, .selection-bar, .override-editor, .notice { align-items:stretch; flex-direction:column; }
         .party-buttons { width:100%; } .party-choice { min-width:0; flex:1; }
         .calendar-card { padding:10px 6px; }
         .calendar { gap:3px; }
@@ -544,6 +627,7 @@ class SharedSchedulePanel extends HTMLElement {
         .override-row button:last-child { grid-column:3; }
         .settings-card { grid-template-columns:1fr; }
         .settings-card > button { grid-column:1; justify-self:stretch; }
+        .fallback-form { grid-template-columns:1fr; }
       }
     `;
   }
