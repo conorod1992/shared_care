@@ -8,6 +8,5 @@
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/conorod1992/shared_care/issues",
-  "requirements": ["holidays==0.101"],
-  "version": "1.1.0"
+  "version": "1.1.1"
 }

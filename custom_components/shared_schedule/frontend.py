@@ -47,6 +47,8 @@ async def async_setup_frontend(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_schedule)
     websocket_api.async_register_command(hass, websocket_set_date_overrides)
     websocket_api.async_register_command(hass, websocket_remove_date_overrides)
+    websocket_api.async_register_command(hass, websocket_set_fallback_holiday)
+    websocket_api.async_register_command(hass, websocket_remove_fallback_holiday)
     websocket_api.async_register_command(hass, websocket_set_party_colors)
 
 
@@ -88,6 +90,8 @@ def _payload(
         "effective_handover": model.effective_handover.isoformat(),
         "handover_overridden": model.state.override is not None,
         "shifted_for_public_holiday": model.shifted_for_public_holiday,
+        "holiday_status": {"source": coordinator.holiday_provider.source},
+        "fallback_holidays": [dict(item) for item in coordinator.fallback_holidays],
         "date_overrides": dict(sorted(model.state.date_overrides.items())),
         "calendar": coordinator.calendar(start, days),
         "settings": settings,
@@ -184,6 +188,57 @@ async def websocket_remove_date_overrides(
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{DOMAIN}/fallback_holidays/set",
+        vol.Required("entry_id"): str,
+        vol.Required("date"): cv.date,
+        vol.Optional("name"): vol.All(str, vol.Length(max=120)),
+    }
+)
+@websocket_api.async_response
+async def websocket_set_fallback_holiday(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Create or update a fallback holiday."""
+    coordinator = _coordinators(hass).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"
+        )
+        return
+    await coordinator.async_set_fallback_holiday(msg["date"], msg.get("name"))
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/fallback_holidays/remove",
+        vol.Required("entry_id"): str,
+        vol.Required("date"): cv.date,
+    }
+)
+@websocket_api.async_response
+async def websocket_remove_fallback_holiday(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Remove a fallback holiday."""
+    coordinator = _coordinators(hass).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"
+        )
+        return
+    await coordinator.async_remove_fallback_holiday(msg["date"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{DOMAIN}/party_colors/set",
         vol.Required("entry_id"): str,
         vol.Required(CONF_PARTY_A_COLOR): vol.Match(r"^#[0-9a-fA-F]{6}$"),
@@ -197,8 +252,7 @@ async def websocket_set_party_colors(
     msg: dict[str, Any],
 ) -> None:
     """Persist display-only party colours."""
-    entry_id = msg.get("entry_id")
-    coordinator = _coordinators(hass).get(entry_id)
+    coordinator = _coordinators(hass).get(msg["entry_id"])
     if coordinator is None:
         connection.send_error(
             msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"

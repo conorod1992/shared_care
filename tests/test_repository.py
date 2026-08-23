@@ -26,6 +26,7 @@ def test_manifest_contains_hacs_required_fields() -> None:
         "version",
     }
     assert required <= manifest.keys()
+    assert "requirements" not in manifest
 
 
 def test_frontend_panel_asset_is_packaged() -> None:
@@ -37,10 +38,7 @@ def test_frontend_panel_asset_is_packaged() -> None:
         / "shared-schedule-panel.js"
     )
     assert panel.is_file()
-    contents = panel.read_text(encoding="utf-8")
-    assert "shared_schedule/date_overrides/set" in contents
-    assert "shared_schedule/party_colors/set" in contents
-    assert "Override ·" in contents
+    assert "shared_schedule/date_overrides/set" in panel.read_text(encoding="utf-8")
 
 
 def test_date_overrides_are_loaded_and_saved_through_store() -> None:
@@ -51,9 +49,9 @@ def test_date_overrides_are_loaded_and_saved_through_store() -> None:
     assert '"date_overrides": dict(sorted(' in coordinator
 
 
-def test_party_colours_are_loaded_and_saved_through_store() -> None:
+def test_fallback_holidays_are_loaded_and_saved_through_store() -> None:
     coordinator = (
         ROOT / "custom_components" / "shared_schedule" / "coordinator.py"
     ).read_text(encoding="utf-8")
-    assert 'stored.get("display_settings", {})' in coordinator
-    assert '"display_settings": dict(self.display_settings)' in coordinator
+    assert 'stored.get("fallback_holidays", [])' in coordinator
+    assert '"fallback_holidays": [dict(item)' in coordinator

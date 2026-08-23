@@ -9,7 +9,6 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import holidays
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_point_in_utc_time
@@ -31,6 +30,13 @@ from .const import (
     DEFAULT_PARTY_A_COLOR,
     DEFAULT_PARTY_B_COLOR,
     DOMAIN,
+)
+from .holiday import (
+    HolidayProvider,
+    normalize_fallback_holidays,
+    remove_fallback_holiday,
+    resolve_holiday_provider,
+    upsert_fallback_holiday,
 )
 from .model import ScheduleModel, ScheduleSettings, ScheduleState
 
@@ -70,6 +76,8 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             CONF_PARTY_A_COLOR: DEFAULT_PARTY_A_COLOR,
             CONF_PARTY_B_COLOR: DEFAULT_PARTY_B_COLOR,
         }
+        self.fallback_holidays: list[dict[str, str]] = []
+        self.holiday_provider: HolidayProvider
         self.model: ScheduleModel
 
     @property
@@ -119,14 +127,32 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         stored = await self._store.async_load()
         stored = stored or {}
         self.display_settings = _display_settings(stored)
-        calendar = await self.hass.async_add_executor_job(
-            holidays.country_holidays, self.settings_data[CONF_COUNTRY]
+        self.fallback_holidays = normalize_fallback_holidays(
+            stored.get("fallback_holidays", [])
         )
+        shift_holidays = self._settings().shift_public_holidays
+        if shift_holidays:
+            self.holiday_provider = await self.hass.async_add_executor_job(
+                resolve_holiday_provider,
+                True,
+                self.settings_data[CONF_COUNTRY],
+                self.fallback_holidays,
+            )
+            if self.holiday_provider.error:
+                _LOGGER.warning(
+                    "Automatic holiday data is unavailable for %s: %s",
+                    self.settings_data[CONF_COUNTRY],
+                    self.holiday_provider.error,
+                )
+        else:
+            self.holiday_provider = resolve_holiday_provider(
+                False,
+                self.settings_data[CONF_COUNTRY],
+                self.fallback_holidays,
+            )
         now = self._now()
         if stored:
-            next_base = self._local_datetime(
-                datetime.fromisoformat(stored["next_base"])
-            )
+            next_base = self._local_datetime(datetime.fromisoformat(stored["next_base"]))
             override = stored.get("override")
             state = ScheduleState(
                 current_party=stored["current_party"],
@@ -143,7 +169,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                 current_party=self.settings_data[CONF_CURRENT_PARTY],
                 next_base=self._initial_base(now),
             )
-        self.model = ScheduleModel(self._settings(), state, calendar.__contains__)
+        self.model = ScheduleModel(self._settings(), state, self.holiday_provider)
         completed = self.model.reconcile(now)
         if completed:
             _LOGGER.info("Reconciled %s missed handover(s)", completed)
@@ -160,6 +186,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                     else None
                 ),
                 "date_overrides": dict(sorted(self.model.state.date_overrides.items())),
+                "fallback_holidays": [dict(item) for item in self.fallback_holidays],
                 "display_settings": dict(self.display_settings),
             }
         )
@@ -196,9 +223,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             self.model.clear_override()
             await self._async_commit()
 
-    async def async_set_date_overrides(
-        self, values: list[date], party: str
-    ) -> None:
+    async def async_set_date_overrides(self, values: list[date], party: str) -> None:
         """Add or replace one or many date ownership overrides."""
         async with self._lock:
             self.model.set_date_overrides(values, party)
@@ -208,6 +233,26 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         """Remove one or many date ownership overrides."""
         async with self._lock:
             self.model.remove_date_overrides(values)
+            await self._async_commit()
+
+    async def async_set_fallback_holiday(
+        self, value: date, name: str | None = None
+    ) -> None:
+        """Create or update a stored fallback holiday."""
+        async with self._lock:
+            self.fallback_holidays = upsert_fallback_holiday(
+                self.fallback_holidays, value, name
+            )
+            self.holiday_provider.set_fallback_holidays(self.fallback_holidays)
+            await self._async_commit()
+
+    async def async_remove_fallback_holiday(self, value: date) -> None:
+        """Remove a stored fallback holiday."""
+        async with self._lock:
+            self.fallback_holidays = remove_fallback_holiday(
+                self.fallback_holidays, value
+            )
+            self.holiday_provider.set_fallback_holidays(self.fallback_holidays)
             await self._async_commit()
 
     async def async_set_party_colors(
