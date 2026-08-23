@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,9 +22,13 @@ from .const import (
     CONF_CURRENT_PARTY,
     CONF_HANDOVER_TIME,
     CONF_PARTY_A,
+    CONF_PARTY_A_COLOR,
     CONF_PARTY_B,
+    CONF_PARTY_B_COLOR,
     CONF_RECURRENCE_WEEKS,
     CONF_SHIFT_HOLIDAYS,
+    DEFAULT_PARTY_A_COLOR,
+    DEFAULT_PARTY_B_COLOR,
     DOMAIN,
 )
 from .holiday import (
@@ -37,6 +42,22 @@ from .model import ScheduleModel, ScheduleSettings, ScheduleState
 
 _LOGGER = logging.getLogger(__name__)
 _STORE_VERSION = 1
+_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _display_settings(stored: dict[str, Any]) -> dict[str, str]:
+    """Return validated display settings with backwards-compatible defaults."""
+    values = stored.get("display_settings", {})
+    values = values if isinstance(values, dict) else {}
+    result = {
+        CONF_PARTY_A_COLOR: DEFAULT_PARTY_A_COLOR,
+        CONF_PARTY_B_COLOR: DEFAULT_PARTY_B_COLOR,
+    }
+    for key in result:
+        value = values.get(key)
+        if isinstance(value, str) and _COLOR_PATTERN.fullmatch(value):
+            result[key] = value
+    return result
 
 
 class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
@@ -51,6 +72,10 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         self._lock = asyncio.Lock()
         self._cancel_timer = None
         self._tz = ZoneInfo(hass.config.time_zone)
+        self.display_settings = {
+            CONF_PARTY_A_COLOR: DEFAULT_PARTY_A_COLOR,
+            CONF_PARTY_B_COLOR: DEFAULT_PARTY_B_COLOR,
+        }
         self.fallback_holidays: list[dict[str, str]] = []
         self.holiday_provider: HolidayProvider
         self.model: ScheduleModel
@@ -101,6 +126,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         """Load state, reconcile downtime, publish, and arm a timer."""
         stored = await self._store.async_load()
         stored = stored or {}
+        self.display_settings = _display_settings(stored)
         self.fallback_holidays = normalize_fallback_holidays(
             stored.get("fallback_holidays", [])
         )
@@ -126,9 +152,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             )
         now = self._now()
         if stored:
-            next_base = self._local_datetime(
-                datetime.fromisoformat(stored["next_base"])
-            )
+            next_base = self._local_datetime(datetime.fromisoformat(stored["next_base"]))
             override = stored.get("override")
             state = ScheduleState(
                 current_party=stored["current_party"],
@@ -163,6 +187,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                 ),
                 "date_overrides": dict(sorted(self.model.state.date_overrides.items())),
                 "fallback_holidays": [dict(item) for item in self.fallback_holidays],
+                "display_settings": dict(self.display_settings),
             }
         )
 
@@ -228,6 +253,21 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
                 self.fallback_holidays, value
             )
             self.holiday_provider.set_fallback_holidays(self.fallback_holidays)
+            await self._async_commit()
+
+    async def async_set_party_colors(
+        self, party_a_color: str, party_b_color: str
+    ) -> None:
+        """Persist display-only party colours without changing schedule state."""
+        async with self._lock:
+            self.display_settings = _display_settings(
+                {
+                    "display_settings": {
+                        CONF_PARTY_A_COLOR: party_a_color,
+                        CONF_PARTY_B_COLOR: party_b_color,
+                    }
+                }
+            )
             await self._async_commit()
 
     def calendar(self, start: date, days: int) -> list[dict[str, object]]:
