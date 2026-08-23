@@ -26,6 +26,7 @@ def test_manifest_contains_hacs_required_fields() -> None:
         "version",
     }
     assert required <= manifest.keys()
+    assert "requirements" not in manifest
 
 
 def test_frontend_panel_asset_is_packaged() -> None:
@@ -46,3 +47,11 @@ def test_date_overrides_are_loaded_and_saved_through_store() -> None:
     ).read_text(encoding="utf-8")
     assert 'stored.get("date_overrides", {})' in coordinator
     assert '"date_overrides": dict(sorted(' in coordinator
+
+
+def test_fallback_holidays_are_loaded_and_saved_through_store() -> None:
+    coordinator = (
+        ROOT / "custom_components" / "shared_schedule" / "coordinator.py"
+    ).read_text(encoding="utf-8")
+    assert 'stored.get("fallback_holidays", [])' in coordinator
+    assert '"fallback_holidays": [dict(item)' in coordinator

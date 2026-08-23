@@ -6,22 +6,20 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1] / "custom_components" / "shared_schedule"
 
 
-def test_holiday_calendar_is_only_passed_to_executor() -> None:
+def test_optional_holiday_calendar_is_only_resolved_in_executor() -> None:
     """The holidays registry lazily imports country modules and can block."""
-    executor_calls = 0
-    direct_calls = []
+    coordinator = ast.parse((ROOT / "coordinator.py").read_text(encoding="utf-8"))
+    executor_jobs = [
+        node
+        for node in ast.walk(coordinator)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "async_add_executor_job"
+    ]
+    assert len(executor_jobs) == 1
+    assert isinstance(executor_jobs[0].args[0], ast.Name)
+    assert executor_jobs[0].args[0].id == "resolve_holiday_provider"
 
-    for filename in ("config_flow.py", "coordinator.py"):
-        tree = ast.parse((ROOT / filename).read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(
-                node.func, ast.Attribute
-            ):
-                continue
-            if node.func.attr == "async_add_executor_job":
-                executor_calls += 1
-            if node.func.attr == "country_holidays":
-                direct_calls.append((filename, node.lineno))
-
-    assert executor_calls >= 2
-    assert direct_calls == []
+    config_flow = (ROOT / "config_flow.py").read_text(encoding="utf-8")
+    assert "holidays" not in config_flow
+    assert "_async_validate_country" not in config_flow
