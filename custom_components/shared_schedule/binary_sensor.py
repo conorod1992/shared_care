@@ -40,7 +40,7 @@ class SharedSchedulePartySensor(SharedScheduleEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.model.state.current_party == self._party
+        return self.coordinator.actual_current_party == self._party
 
 
 class SharedScheduleTimingSensor(SharedScheduleEntity, BinarySensorEntity):

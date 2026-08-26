@@ -55,3 +55,37 @@ def test_fallback_holidays_are_loaded_and_saved_through_store() -> None:
     ).read_text(encoding="utf-8")
     assert 'stored.get("fallback_holidays", [])' in coordinator
     assert '"fallback_holidays": [dict(item)' in coordinator
+
+
+def test_actual_owner_entities_do_not_use_raw_cadence_state() -> None:
+    status = (
+        ROOT / "custom_components" / "shared_schedule" / "sensor.py"
+    ).read_text(encoding="utf-8")
+    binary = (
+        ROOT / "custom_components" / "shared_schedule" / "binary_sensor.py"
+    ).read_text(encoding="utf-8")
+    assert "self.coordinator.actual_current_party" in status
+    assert "self.coordinator.actual_current_party == self._party" in binary
+
+
+def test_subject_name_is_optional_and_exposed_to_the_panel() -> None:
+    config_flow = (
+        ROOT / "custom_components" / "shared_schedule" / "config_flow.py"
+    ).read_text(encoding="utf-8")
+    panel_api = (
+        ROOT / "custom_components" / "shared_schedule" / "frontend.py"
+    ).read_text(encoding="utf-8")
+    assert 'current.get(CONF_SUBJECT_NAME, "")' in config_flow
+    assert '"subject_name": subject_name' in panel_api
+
+
+def test_frontend_relative_time_uses_local_calendar_days() -> None:
+    panel = (
+        ROOT
+        / "custom_components"
+        / "shared_schedule"
+        / "frontend"
+        / "shared-schedule-panel.js"
+    ).read_text(encoding="utf-8")
+    assert "localCalendarDay(value) - localCalendarDay(new Date())" in panel
+    assert "Math.ceil" not in panel

@@ -158,6 +158,66 @@ def test_current_actual_owner_respects_time_and_date_override() -> None:
     assert model.actual_party_at(before_handover) == PARTY_B
 
 
+def test_attributes_keep_scheduled_owner_when_today_is_overridden() -> None:
+    model = make_model()
+    now = BASE - timedelta(days=1)
+    model.set_date_overrides([now.date()], PARTY_B)
+    attributes = model.attributes(now)
+    assert attributes["actual_current_party_key"] == PARTY_B
+    assert attributes["scheduled_current_party_key"] == PARTY_A
+    assert attributes["current_party"] == "Party B"
+
+
+def test_next_perspective_transition_normal_and_manual_override() -> None:
+    model = make_model(current=PARTY_B)
+    now = BASE - timedelta(days=1)
+    attributes = model.attributes(now)
+    assert attributes["with_me"] is False
+    assert attributes["next_handover_direction"] == "to_me"
+    assert attributes["next_time_with_me"] == BASE.isoformat()
+
+    changed = BASE + timedelta(days=2)
+    model.set_override(changed, now)
+    attributes = model.attributes(now)
+    assert attributes["next_time_with_me"] == changed.isoformat()
+    assert attributes["next_effective_transition_source"] == "manual_override"
+
+
+def test_next_perspective_transition_from_me() -> None:
+    model = make_model(current=PARTY_A)
+    attributes = model.attributes(BASE - timedelta(days=1))
+    assert attributes["with_me"] is True
+    assert attributes["next_handover_direction"] == "from_me"
+    assert attributes["next_time_leaving_me"] == BASE.isoformat()
+
+
+def test_date_override_can_be_the_next_time_with_me() -> None:
+    model = make_model(current=PARTY_B)
+    now = BASE - timedelta(days=2)
+    override_date = now.date() + timedelta(days=1)
+    model.set_date_overrides([override_date], PARTY_A)
+    expected = datetime.combine(override_date, datetime.min.time(), TZ)
+    attributes = model.attributes(now)
+    assert attributes["next_time_with_me"] == expected.isoformat()
+    assert attributes["next_effective_transition_source"] == "date_override"
+
+
+def test_temporary_change_uses_only_date_overrides() -> None:
+    model = make_model()
+    original_base = model.base_handover
+    values = model.set_temporary_change(
+        date(2026, 8, 2), date(2026, 8, 5), PARTY_A
+    )
+    assert values == [date(2026, 8, day) for day in range(2, 6)]
+    assert model.base_handover == original_base
+    # The first date already belongs to A and is deliberately not persisted.
+    assert model.state.date_overrides == {
+        "2026-08-03": PARTY_A,
+        "2026-08-04": PARTY_A,
+        "2026-08-05": PARTY_A,
+    }
+
+
 def test_multi_day_override() -> None:
     model = make_model()
     values = [date(2026, 8, day) for day in range(7, 10)]

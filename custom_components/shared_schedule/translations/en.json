@@ -9,7 +9,9 @@
           "name": "Schedule name",
           "party_a": "Party A display name",
           "party_b": "Party B display name",
-          "current_party": "Current party",
+          "current_party": "Scheduled/current cadence owner",
+          "my_party": "Which party represents me",
+          "subject_name": "Care subject display name (optional)",
           "anchor_date": "Reference handover date",
           "recurrence_weeks": "Recurrence interval (weeks)",
           "weekday": "Default weekday",
@@ -33,6 +35,8 @@
         "data": {
           "party_a": "Party A display name",
           "party_b": "Party B display name",
+          "my_party": "Which party represents me",
+          "subject_name": "Care subject display name (optional)",
           "recurrence_weeks": "Recurrence interval (weeks)",
           "country": "Holiday country code",
           "shift_public_holidays": "Move public-holiday handovers to the following day"
