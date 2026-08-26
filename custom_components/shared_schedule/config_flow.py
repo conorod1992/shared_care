@@ -17,10 +17,12 @@ from .const import (
     CONF_COUNTRY,
     CONF_CURRENT_PARTY,
     CONF_HANDOVER_TIME,
+    CONF_MY_PARTY,
     CONF_PARTY_A,
     CONF_PARTY_B,
     CONF_RECURRENCE_WEEKS,
     CONF_SHIFT_HOLIDAYS,
+    CONF_SUBJECT_NAME,
     CONF_WEEKDAY,
     DOMAIN,
     PARTY_A,
@@ -67,6 +69,20 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 )
             ),
             vol.Required(
+                CONF_MY_PARTY, default=defaults.get(CONF_MY_PARTY, PARTY_A)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value="a", label="Party A"),
+                        selector.SelectOptionDict(value="b", label="Party B"),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_SUBJECT_NAME, default=defaults.get(CONF_SUBJECT_NAME, "")
+            ): str,
+            vol.Required(
                 CONF_ANCHOR_DATE, default=defaults.get(CONF_ANCHOR_DATE, _next_monday())
             ): selector.DateSelector(),
             vol.Required(
@@ -102,6 +118,7 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     normalized[CONF_HANDOVER_TIME] = str(data[CONF_HANDOVER_TIME])
     normalized[CONF_WEEKDAY] = int(data[CONF_WEEKDAY])
     normalized[CONF_COUNTRY] = data[CONF_COUNTRY].strip().upper()
+    normalized[CONF_SUBJECT_NAME] = data.get(CONF_SUBJECT_NAME, "").strip()
     return normalized
 
 
@@ -160,6 +177,20 @@ class SharedScheduleOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_PARTY_A, default=current[CONF_PARTY_A]): str,
                 vol.Required(CONF_PARTY_B, default=current[CONF_PARTY_B]): str,
                 vol.Required(
+                    CONF_MY_PARTY, default=current.get(CONF_MY_PARTY, PARTY_A)
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(value="a", label="Party A"),
+                            selector.SelectOptionDict(value="b", label="Party B"),
+                        ],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_SUBJECT_NAME, default=current.get(CONF_SUBJECT_NAME, "")
+                ): str,
+                vol.Required(
                     CONF_RECURRENCE_WEEKS,
                     default=current[CONF_RECURRENCE_WEEKS],
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=52)),
@@ -172,6 +203,9 @@ class SharedScheduleOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_COUNTRY] = user_input[CONF_COUNTRY].strip().upper()
+            user_input[CONF_SUBJECT_NAME] = user_input.get(
+                CONF_SUBJECT_NAME, ""
+            ).strip()
             if (
                 not user_input[CONF_PARTY_A].strip()
                 or not user_input[CONF_PARTY_B].strip()

@@ -36,6 +36,21 @@ const formatDateTime = (value) =>
     minute: "2-digit",
   });
 
+const localCalendarDay = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
+};
+
+const relativeTime = (value) => {
+  const days = Math.max(
+    0,
+    localCalendarDay(value) - localCalendarDay(new Date()),
+  );
+  if (days === 0) return "today";
+  if (days === 1) return "in 1 day";
+  return `in ${days} days`;
+};
+
 class SharedSchedulePanel extends HTMLElement {
   constructor() {
     super();
@@ -48,6 +63,8 @@ class SharedSchedulePanel extends HTMLElement {
     this._selected = new Set();
     this._rangeAnchor = undefined;
     this._editingDate = undefined;
+    this._editingNote = false;
+    this._temporaryPreview = undefined;
     this._loading = false;
     this._error = undefined;
   }
@@ -140,7 +157,10 @@ class SharedSchedulePanel extends HTMLElement {
     const last = dates[dates.length - 1];
     const contiguous = dates.every(
       (value, index) =>
-        index === 0 || parseDate(value) - parseDate(dates[index - 1]) === DAY_MS,
+        index === 0 ||
+        localCalendarDay(parseDate(value)) -
+          localCalendarDay(parseDate(dates[index - 1])) ===
+          1,
     );
     const dateOptions = { weekday: "long", day: "numeric", month: "long" };
     let when;
@@ -166,7 +186,9 @@ class SharedSchedulePanel extends HTMLElement {
       if (
         previous &&
         previous.party === party &&
-        parseDate(value) - parseDate(previous.dates.at(-1)) === DAY_MS
+        localCalendarDay(parseDate(value)) -
+          localCalendarDay(parseDate(previous.dates.at(-1))) ===
+          1
       ) {
         previous.dates.push(value);
       } else {
@@ -180,6 +202,7 @@ class SharedSchedulePanel extends HTMLElement {
     const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const summary = this._summary();
     return `
+      ${this._temporaryChangeWizard(schedule)}
       <section class="card owner-picker">
         <div>
           <h2>Add an override</h2>
@@ -228,6 +251,46 @@ class SharedSchedulePanel extends HTMLElement {
               <button class="primary" data-action="save-selection">Save override</button></div></section>`
           : ""
       }`;
+  }
+
+  _temporaryChangeWizard(schedule) {
+    const today = isoDate(new Date());
+    const first = schedule.calendar.find((day) => day.date >= today)?.date;
+    const last = schedule.calendar.at(-1)?.date;
+    const preview = this._temporaryPreview;
+    const subject = schedule.subject_name || "the care subject";
+    return `<section class="card temporary-card">
+      <div class="temporary-heading"><div><h2>Temporary schedule change</h2>
+        <p>Keep ${escapeHtml(subject)} with one person for a date range, then resume the normal alternating schedule unchanged.</p></div></div>
+      <div class="temporary-form">
+        <label>${escapeHtml(schedule.subject_name || "Care subject")} will stay with
+          <select data-field="temporary-party">
+            ${Object.entries(schedule.parties).map(([key, name]) => `<option value="${key}" ${preview?.party === key ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>From <input type="date" data-field="temporary-start" min="${first}" max="${last}" value="${preview?.start || first}" required></label>
+        <label>Through <input type="date" data-field="temporary-end" min="${first}" max="${last}" value="${preview?.end || first}" required></label>
+        <button class="secondary" data-action="preview-temporary">Preview</button>
+      </div>
+      ${preview ? this._temporaryChangePreview(schedule, preview) : ""}
+    </section>`;
+  }
+
+  _temporaryChangePreview(schedule, preview) {
+    const days = schedule.calendar.filter((day) => day.date >= preview.start && day.date <= preview.end);
+    const existing = days.filter((day) => day.overridden).length;
+    const dateOptions = { weekday: "long", day: "numeric", month: "long" };
+    const when = preview.start === preview.end
+      ? `on ${formatDate(preview.start, dateOptions)}`
+      : `from ${formatDate(preview.start, dateOptions)} through ${formatDate(preview.end, dateOptions)}`;
+    const sentenceSubject = schedule.subject_name || "The care subject";
+    return `<div class="temporary-preview">
+      <strong>Preview</strong>
+      <p>${escapeHtml(sentenceSubject)} will stay with ${escapeHtml(schedule.parties[preview.party])} ${escapeHtml(when)}. The normal alternating schedule resumes afterwards.</p>
+      <div class="affected-dates" aria-label="Affected dates">${days.map((day) => `<span>${escapeHtml(formatDate(day.date, { weekday: "short", day: "numeric", month: "short" }))}</span>`).join("")}</div>
+      ${existing ? `<small>${existing} existing override${existing === 1 ? "" : "s"} in this range will be replaced predictably. Dates already assigned to ${escapeHtml(schedule.parties[preview.party])} will not be stored redundantly.</small>` : `<small>Dates already assigned to ${escapeHtml(schedule.parties[preview.party])} will not be stored redundantly.</small>`}
+      <div class="preview-actions"><button class="secondary" data-action="cancel-temporary">Cancel</button><button class="primary" data-action="save-temporary">Save temporary change</button></div>
+    </div>`;
   }
 
   _overrideEditor(schedule, value) {
@@ -282,6 +345,8 @@ class SharedSchedulePanel extends HTMLElement {
     const rows = [
       ["Party A", settings.party_a],
       ["Party B", settings.party_b],
+      ["My party", schedule.my_party_name],
+      ["Care subject", schedule.subject_name || "Not configured (neutral fallback)"],
       ["Recurrence", `Every ${settings.recurrence_weeks} week${settings.recurrence_weeks === 1 ? "" : "s"}`],
       ["Handover time", settings.handover_time],
       ["Holiday country", settings.country],
@@ -377,13 +442,40 @@ class SharedSchedulePanel extends HTMLElement {
 
   _overview(schedule) {
     const effectiveDiffers = schedule.normal_handover !== schedule.effective_handover;
-    return `<section class="overview">
-      <article class="hero card"><span>Current actual owner</span><strong>${escapeHtml(schedule.actual_current_party_name)}</strong>
-        ${schedule.actual_current_party !== schedule.current_party ? "<small>Date override active today</small>" : "<small>Recurring schedule</small>"}</article>
-      <article class="card metric"><span>Next normal handover</span><strong>${escapeHtml(formatDateTime(schedule.normal_handover))}</strong>
-        ${schedule.shifted_for_public_holiday ? "<small>Adjusted for a public holiday</small>" : "<small>Recurring cadence</small>"}</article>
-      <article class="card metric"><span>Next effective handover</span><strong>${escapeHtml(formatDateTime(schedule.effective_handover))}</strong>
-        <small>${effectiveDiffers ? "Handover override active" : "Same as normal"}</small></article>
+    const direction = schedule.next_handover_direction === "to_me"
+      ? "Coming home"
+      : `Going to ${schedule.next_effective_transition_to}`;
+    let explanation = "Normal recurring handover";
+    if (schedule.next_effective_transition_source === "date_override") {
+      explanation = "Changed by a date ownership override";
+    } else if (schedule.handover_overridden) {
+      explanation = `Manually changed from ${formatDateTime(schedule.normal_handover)}`;
+    } else if (schedule.shifted_for_public_holiday) {
+      explanation = `Moved from ${formatDateTime(schedule.base_handover)} because of a public holiday`;
+    }
+    const questionSubject = schedule.subject_name || "the care subject";
+    const sentenceSubject = schedule.subject_name || "The care subject";
+    return `<section class="care-overview card">
+      <div class="subject-now"><span>Where is ${escapeHtml(questionSubject)} now?</span><h2>${escapeHtml(sentenceSubject)} is with ${escapeHtml(schedule.actual_current_party_name)}</h2>
+        <small>Actual current owner${schedule.actual_current_party !== schedule.scheduled_current_party ? ` · scheduled cadence owner is ${escapeHtml(schedule.scheduled_current_party_name)}` : ""}</small></div>
+      <div class="subject-next"><span>What happens next?</span><h2>${escapeHtml(direction)}</h2>
+        <strong>${escapeHtml(formatDateTime(schedule.next_effective_transition))}</strong>
+        <em>${escapeHtml(relativeTime(schedule.next_effective_transition))}</em>
+        <small>${escapeHtml(explanation)}</small></div>
+      <div class="handover-note">
+        <span>Private handover note</span>
+        ${this._editingNote
+          ? `<textarea data-field="handover-note" maxlength="500" rows="3" placeholder="Reminder for this handover only">${escapeHtml(schedule.handover_note || "")}</textarea><div><button class="secondary" data-action="cancel-note">Cancel</button><button class="primary" data-action="save-note">Save note</button></div>`
+          : schedule.handover_note
+            ? `<p>${escapeHtml(schedule.handover_note)}</p><div><button class="secondary" data-action="edit-note">Edit</button><button class="danger" data-action="remove-note">Remove</button></div>`
+            : `<button class="secondary" data-action="edit-note">Add note</button>`}
+      </div>
+      <details class="handover-details"><summary>Normal and effective handover details</summary>
+        <dl><div><dt>Scheduled/current cadence owner</dt><dd>${escapeHtml(schedule.scheduled_current_party_name)}</dd></div>
+          <div><dt>Normal holiday-adjusted handover</dt><dd>${escapeHtml(formatDateTime(schedule.normal_handover))}</dd></div>
+          <div><dt>Effective cadence handover</dt><dd>${escapeHtml(formatDateTime(schedule.effective_handover))}</dd></div></dl>
+        <small>${effectiveDiffers ? "A manual handover override is active." : "The cadence handover has no manual override."}</small>
+      </details>
     </section>`;
   }
 
@@ -464,6 +556,39 @@ class SharedSchedulePanel extends HTMLElement {
       this._editingDate = undefined;
       return this._render();
     }
+    if (action === "edit-note") {
+      this._editingNote = true;
+      return this._render();
+    }
+    if (action === "cancel-note") {
+      this._editingNote = false;
+      return this._render();
+    }
+    if (action === "cancel-temporary") {
+      this._temporaryPreview = undefined;
+      return this._render();
+    }
+    if (action === "preview-temporary") {
+      const party = this.shadowRoot.querySelector('[data-field="temporary-party"]').value;
+      const startInput = this.shadowRoot.querySelector('[data-field="temporary-start"]');
+      const endInput = this.shadowRoot.querySelector('[data-field="temporary-end"]');
+      if (!startInput.reportValidity() || !endInput.reportValidity()) return;
+      if (endInput.value < startInput.value) {
+        endInput.setCustomValidity("End date must not be before start date");
+        endInput.reportValidity();
+        endInput.setCustomValidity("");
+        return;
+      }
+      this._temporaryPreview = {
+        party,
+        start: startInput.value,
+        end: endInput.value,
+        ...(this._temporaryPreview?.originalDates
+          ? { originalDates: this._temporaryPreview.originalDates }
+          : {}),
+      };
+      return this._render();
+    }
     if (action === "open-settings") {
       window.history.pushState(null, "", "/config/integrations/integration/shared_schedule");
       window.dispatchEvent(new Event("location-changed"));
@@ -477,9 +602,13 @@ class SharedSchedulePanel extends HTMLElement {
     }
     if (action === "edit-group") {
       this._tab = "schedule";
-      this._party = element.dataset.party;
-      this._selected = new Set(element.dataset.dates.split(","));
-      this._rangeAnchor = undefined;
+      const dates = element.dataset.dates.split(",");
+      this._temporaryPreview = {
+        party: element.dataset.party,
+        start: dates[0],
+        end: dates.at(-1),
+        originalDates: dates,
+      };
       return this._render();
     }
     try {
@@ -487,6 +616,15 @@ class SharedSchedulePanel extends HTMLElement {
         await this._setOverrides([...this._selected], this._party);
         this._selected.clear();
         this._rangeAnchor = undefined;
+      } else if (action === "save-temporary") {
+        await this._setTemporaryChange(this._temporaryPreview);
+        this._temporaryPreview = undefined;
+      } else if (action === "save-note") {
+        const note = this.shadowRoot.querySelector('[data-field="handover-note"]').value;
+        await this._setHandoverNote(note);
+        this._editingNote = false;
+      } else if (action === "remove-note") {
+        await this._setHandoverNote("");
       } else if (action === "replace-one") {
         await this._setOverrides([element.dataset.date], element.dataset.party);
         this._editingDate = undefined;
@@ -556,6 +694,26 @@ class SharedSchedulePanel extends HTMLElement {
     });
   }
 
+  _setHandoverNote(note) {
+    return this._call({
+      type: "shared_schedule/handover_note/set",
+      entry_id: this._entryId,
+      occurrence_id: this._schedule.handover_occurrence_id,
+      note,
+    });
+  }
+
+  _setTemporaryChange(change) {
+    return this._call({
+      type: "shared_schedule/temporary_change/set",
+      entry_id: this._entryId,
+      party: change.party,
+      start: change.start,
+      end: change.end,
+      ...(change.originalDates ? { replace_dates: change.originalDates } : {}),
+    });
+  }
+
   _styles() {
     return `
       :host { display:block; min-height:100%; color:var(--primary-text-color); background:var(--primary-background-color); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
@@ -568,9 +726,30 @@ class SharedSchedulePanel extends HTMLElement {
       h1 { margin:4px 0 0; font-size:clamp(1.8rem, 4vw, 2.7rem); line-height:1; }
       h2, h3, p { margin-top:0; } h2 { margin-bottom:8px; } p { color:var(--secondary-text-color); line-height:1.5; }
       .card { background:var(--card-background-color); border:1px solid var(--divider-color); border-radius:18px; box-shadow:var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.08)); }
-      .overview { display:grid; grid-template-columns:1.15fr 1fr 1fr; gap:14px; }
-      .overview article { padding:22px; min-height:130px; display:flex; flex-direction:column; }
-      .overview strong { margin:auto 0 7px; font-size:1.22rem; }
+      .care-overview { display:grid; grid-template-columns:1.1fr 1fr; overflow:hidden; }
+      .subject-now, .subject-next { padding:26px; min-height:190px; display:flex; flex-direction:column; }
+      .subject-now { background:linear-gradient(135deg, var(--primary-color), color-mix(in srgb, var(--primary-color) 72%, #171e3d)); color:var(--text-primary-color, white); }
+      .subject-now span, .subject-now small { color:color-mix(in srgb, currentColor 76%, transparent); }
+      .care-overview h2 { margin:auto 0 10px; font-size:clamp(1.45rem, 3vw, 2.15rem); }
+      .subject-next strong { font-size:1.06rem; }
+      .subject-next em { margin:5px 0 12px; color:var(--primary-color); font-style:normal; font-weight:700; }
+      .handover-note { grid-column:1 / -1; padding:16px 22px; border-top:1px solid var(--divider-color); display:flex; align-items:center; gap:14px; }
+      .handover-note > span { color:var(--secondary-text-color); font-size:.78rem; font-weight:700; text-transform:uppercase; }
+      .handover-note p, .handover-note textarea { flex:1; margin:0; color:var(--primary-text-color); }
+      .handover-note div { display:flex; gap:8px; }
+      .handover-details { grid-column:1 / -1; padding:14px 22px; border-top:1px solid var(--divider-color); }
+      .handover-details summary { cursor:pointer; color:var(--secondary-text-color); font-weight:700; }
+      .handover-details dl { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+      .handover-details dl div { display:flex; flex-direction:column; gap:4px; }
+      .temporary-card { padding:22px; margin-bottom:14px; }
+      .temporary-form { display:grid; grid-template-columns:1.2fr 1fr 1fr auto; gap:12px; align-items:end; }
+      .temporary-form label { display:flex; flex-direction:column; gap:6px; color:var(--secondary-text-color); font-size:.86rem; font-weight:600; }
+      .temporary-preview { margin-top:18px; padding:16px; border-radius:12px; background:var(--secondary-background-color); }
+      .temporary-preview p { color:var(--primary-text-color); margin:6px 0 10px; }
+      .affected-dates { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+      .affected-dates span { padding:5px 8px; border-radius:999px; background:var(--card-background-color); border:1px solid var(--divider-color); font-size:.75rem; }
+      .temporary-preview small { display:block; }
+      .preview-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
       .notice { margin-top:14px; padding:18px 20px; display:flex; align-items:center; justify-content:space-between; gap:20px; border-radius:14px; }
       .notice p { margin:4px 0 0; }
       .notice.mild { background:color-mix(in srgb, var(--primary-color) 8%, var(--card-background-color)); border:1px solid color-mix(in srgb, var(--primary-color) 35%, var(--divider-color)); }
@@ -645,8 +824,11 @@ class SharedSchedulePanel extends HTMLElement {
       select, input { padding:9px 12px; border:1px solid var(--divider-color); border-radius:9px; background:var(--card-background-color); color:var(--primary-text-color); }
       @media (max-width:780px) {
         .page { padding:18px 10px 40px; }
-        .overview { grid-template-columns:1fr; }
-        .overview article { min-height:105px; }
+        .care-overview { grid-template-columns:1fr; }
+        .subject-now, .subject-next { min-height:150px; }
+        .handover-note { align-items:stretch; flex-direction:column; }
+        .handover-details dl { grid-template-columns:1fr; }
+        .temporary-form { grid-template-columns:1fr; }
         .owner-picker, .calendar-heading, .selection-bar, .override-editor, .notice { align-items:stretch; flex-direction:column; }
         .party-buttons { width:100%; } .party-choice { min-width:0; flex:1; }
         .calendar-card { padding:10px 6px; }

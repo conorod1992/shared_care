@@ -14,12 +14,19 @@ CONF_COUNTRY = "country"
 CONF_SHIFT_HOLIDAYS = "shift_public_holidays"
 CONF_PARTY_A_COLOR = "party_a_color"
 CONF_PARTY_B_COLOR = "party_b_color"
+CONF_MY_PARTY = "my_party"
+CONF_SUBJECT_NAME = "subject_name"
 
 DEFAULT_PARTY_A_COLOR = "#3f8fc9"
 DEFAULT_PARTY_B_COLOR = "#b06ab3"
 
 PARTY_A = "a"
 PARTY_B = "b"
+
+EVENT_HANDOVER_COMPLETED = f"{DOMAIN}_handover_completed"
+EVENT_SCHEDULE_CHANGED = f"{DOMAIN}_schedule_changed"
+
+HANDOVER_NOTE_MAX_LENGTH = 500
 
 SERVICE_SET_OVERRIDE = "set_handover_override"
 SERVICE_CLEAR_OVERRIDE = "clear_handover_override"

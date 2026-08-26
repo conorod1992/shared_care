@@ -23,6 +23,7 @@ class ScheduleSettings:
     party_b: str
     recurrence_weeks: int = 2
     shift_public_holidays: bool = True
+    my_party: str = PARTY_A
 
     @property
     def interval(self) -> timedelta:
@@ -63,6 +64,8 @@ class ScheduleModel:
             date.fromisoformat(value)
         if settings.recurrence_weeks < 1:
             raise ValueError("recurrence_weeks must be at least 1")
+        if settings.my_party not in (PARTY_A, PARTY_B):
+            raise ValueError("my_party must be 'a' or 'b'")
         self.settings = settings
         self.state = state
         self._is_holiday = is_holiday
@@ -94,6 +97,7 @@ class ScheduleModel:
 
     @property
     def current_party_name(self) -> str:
+        """Return the scheduled/current cadence owner name."""
         return (
             self.settings.party_a
             if self.state.current_party == PARTY_A
@@ -135,11 +139,108 @@ class ScheduleModel:
             value.isoformat(), self.normal_party_for_date(value)
         )
 
+    def _effective_handover_for_base(self, base: datetime, *, first: bool) -> datetime:
+        """Return an effective occurrence while preserving adjustment order."""
+        if first and self.state.override is not None:
+            return self.state.override
+        if self.settings.shift_public_holidays and self._is_holiday(base.date()):
+            return base + timedelta(days=1)
+        return base
+
+    def scheduled_party_at(self, value: datetime) -> str:
+        """Return the time-based cadence owner, excluding date overrides."""
+        if value.tzinfo is None:
+            raise ValueError("value must be timezone-aware")
+        party = self.state.current_party
+        base = self.base_handover
+        first = True
+        # This is normally zero or one iterations. The guard keeps corrupt or
+        # unexpectedly ancient queries from becoming unbounded.
+        for _ in range(1000):
+            handover = self._effective_handover_for_base(base, first=first)
+            if handover > value:
+                return party
+            party = PARTY_B if party == PARTY_A else PARTY_A
+            base += self.settings.interval
+            first = False
+        raise ValueError("value is too far beyond the active schedule")
+
     def actual_party_at(self, value: datetime) -> str:
         """Return the current time-based owner, including today's date override."""
         return self.state.date_overrides.get(
-            value.date().isoformat(), self.state.current_party
+            value.date().isoformat(), self.scheduled_party_at(value)
         )
+
+    def next_actual_transition(self, now: datetime) -> dict[str, object]:
+        """Return the next effective ownership transition after ``now``.
+
+        Cadence handovers remain time based. Date overrides are evaluated at
+        local midnight, so a handover-day calendar allocation can still differ
+        from the current owner before the configured handover time.
+        """
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        candidates: set[datetime] = set()
+        cadence_sources: dict[datetime, str] = {}
+        end = now + timedelta(days=max(1095, self.settings.interval.days * 3))
+        for value in self.state.date_overrides:
+            override_date = date.fromisoformat(value)
+            for boundary_date in (override_date, override_date + timedelta(days=1)):
+                boundary = datetime.combine(
+                    boundary_date, datetime.min.time(), now.tzinfo
+                )
+                if now < boundary <= end:
+                    candidates.add(boundary)
+        base = self.base_handover
+        first = True
+        while base <= end:
+            candidate = self._effective_handover_for_base(base, first=first)
+            if candidate > now:
+                candidates.add(candidate)
+                if first and self.state.override is not None:
+                    cadence_sources[candidate] = "manual_override"
+                elif self.settings.shift_public_holidays and self._is_holiday(
+                    base.date()
+                ):
+                    cadence_sources[candidate] = "public_holiday"
+                else:
+                    cadence_sources[candidate] = "normal"
+            base += self.settings.interval
+            first = False
+
+        epsilon = timedelta(microseconds=1)
+        for candidate in sorted(candidates):
+            before = self.actual_party_at(candidate - epsilon)
+            after = self.actual_party_at(candidate)
+            if before == after:
+                continue
+            source = cadence_sources.get(candidate, "date_override")
+            return {
+                "datetime": candidate,
+                "from_party": before,
+                "to_party": after,
+                "source": source,
+            }
+        raise ValueError("no ownership transition found")
+
+    def actual_transitions_between(
+        self, start: datetime, end: datetime
+    ) -> list[dict[str, object]]:
+        """Return effective ownership transitions in a bounded interval."""
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("datetimes must be timezone-aware")
+        if end <= start:
+            return []
+        transitions: list[dict[str, object]] = []
+        cursor = start
+        for _ in range(100):
+            transition = self.next_actual_transition(cursor)
+            when = transition["datetime"]
+            if when > end:
+                break
+            transitions.append(transition)
+            cursor = when + timedelta(microseconds=1)
+        return transitions
 
     def set_date_overrides(self, values: list[date], party: str) -> None:
         """Set one or many date overrides without changing the cadence.
@@ -155,6 +256,25 @@ class ScheduleModel:
                 self.state.date_overrides.pop(key, None)
             else:
                 self.state.date_overrides[key] = party
+
+    def temporary_change_dates(
+        self, start: date, end: date, party: str
+    ) -> list[date]:
+        """Validate and return the dates for a temporary owner range."""
+        if party not in (PARTY_A, PARTY_B):
+            raise ValueError("party must be 'a' or 'b'")
+        if end < start:
+            raise ValueError("end date must not be before start date")
+        return [
+            start + timedelta(days=offset)
+            for offset in range((end - start).days + 1)
+        ]
+
+    def set_temporary_change(self, start: date, end: date, party: str) -> list[date]:
+        """Apply a temporary owner range without moving the recurrence."""
+        values = self.temporary_change_dates(start, end, party)
+        self.set_date_overrides(values, party)
+        return values
 
     def _prune_redundant_date_overrides(self) -> None:
         """Discard exceptions that now match normal cadence ownership."""
@@ -265,12 +385,26 @@ class ScheduleModel:
         effective = self.effective_handover
         days = (effective.date() - now.date()).days
         actual_party = self.actual_party_at(now)
+        next_transition = self.next_actual_transition(now)
+        next_at = next_transition["datetime"]
+        with_me = actual_party == self.settings.my_party
+        direction = (
+            "to_me"
+            if next_transition["to_party"] == self.settings.my_party
+            else "from_me"
+        )
         return {
-            "current_party": self.current_party_name,
+            "scheduled_current_party": self.current_party_name,
+            "scheduled_current_party_key": self.state.current_party,
+            "scheduled_next_party": self.next_party_name,
+            "scheduled_next_party_key": self.next_party_key,
+            "current_party": self.party_name(actual_party),
+            "current_party_key": actual_party,
             "actual_current_party": self.party_name(actual_party),
             "actual_current_party_key": actual_party,
-            "next_party": self.next_party_name,
+            "next_party": self.party_name(next_transition["to_party"]),
             "next_handover": effective.isoformat(),
+            "scheduled_next_handover": effective.isoformat(),
             "base_handover": self.base_handover.isoformat(),
             "holiday_adjusted_handover": self.holiday_adjusted_handover.isoformat(),
             "manual_override": self.state.override.isoformat()
@@ -284,4 +418,18 @@ class ScheduleModel:
             "overridden": self.state.override is not None,
             "recurrence_weeks": self.settings.recurrence_weeks,
             "date_overrides": dict(sorted(self.state.date_overrides.items())),
+            "my_party": self.settings.my_party,
+            "my_party_name": self.party_name(self.settings.my_party),
+            "with_me": with_me,
+            "next_effective_transition": next_at.isoformat(),
+            "next_effective_transition_source": next_transition["source"],
+            "next_effective_transition_from": self.party_name(
+                next_transition["from_party"]
+            ),
+            "next_effective_transition_to": self.party_name(
+                next_transition["to_party"]
+            ),
+            "next_handover_direction": direction,
+            "next_time_with_me": next_at.isoformat() if not with_me else None,
+            "next_time_leaving_me": next_at.isoformat() if with_me else None,
         }

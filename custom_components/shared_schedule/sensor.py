@@ -72,7 +72,9 @@ class SharedScheduleStatusSensor(SharedScheduleEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return self.coordinator.model.current_party_name
+        return self.coordinator.model.party_name(
+            self.coordinator.actual_current_party
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

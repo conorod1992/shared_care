@@ -15,7 +15,9 @@ from homeassistant.helpers import config_validation as cv
 from .const import (
     CONF_PARTY_A_COLOR,
     CONF_PARTY_B_COLOR,
+    CONF_SUBJECT_NAME,
     DOMAIN,
+    HANDOVER_NOTE_MAX_LENGTH,
     PARTY_A,
     PARTY_B,
 )
@@ -50,6 +52,8 @@ async def async_setup_frontend(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_set_fallback_holiday)
     websocket_api.async_register_command(hass, websocket_remove_fallback_holiday)
     websocket_api.async_register_command(hass, websocket_set_party_colors)
+    websocket_api.async_register_command(hass, websocket_set_handover_note)
+    websocket_api.async_register_command(hass, websocket_set_temporary_change)
 
 
 def _coordinators(hass: HomeAssistant) -> dict[str, SharedScheduleCoordinator]:
@@ -73,16 +77,26 @@ def _payload(
 ) -> dict[str, Any]:
     model = coordinator.model
     actual_party = coordinator.actual_current_party
+    attributes = model.attributes(coordinator._now())
     settings = {**coordinator.settings_data, **coordinator.display_settings}
+    configured_subject = coordinator.settings_data.get(CONF_SUBJECT_NAME, "")
+    subject_name = (
+        configured_subject.strip()
+        if isinstance(configured_subject, str) and configured_subject.strip()
+        else None
+    )
     return {
         "entry_id": coordinator.entry.entry_id,
         "title": coordinator.entry.title,
+        "subject_name": subject_name,
         "parties": {
             PARTY_A: model.settings.party_a,
             PARTY_B: model.settings.party_b,
         },
-        "current_party": model.state.current_party,
-        "current_party_name": model.current_party_name,
+        "current_party": actual_party,
+        "current_party_name": model.party_name(actual_party),
+        "scheduled_current_party": model.state.current_party,
+        "scheduled_current_party_name": model.current_party_name,
         "actual_current_party": actual_party,
         "actual_current_party_name": model.party_name(actual_party),
         "base_handover": model.base_handover.isoformat(),
@@ -90,6 +104,22 @@ def _payload(
         "effective_handover": model.effective_handover.isoformat(),
         "handover_overridden": model.state.override is not None,
         "shifted_for_public_holiday": model.shifted_for_public_holiday,
+        "my_party": model.settings.my_party,
+        "my_party_name": model.party_name(model.settings.my_party),
+        "with_me": attributes["with_me"],
+        "next_effective_transition": attributes["next_effective_transition"],
+        "next_effective_transition_source": attributes[
+            "next_effective_transition_source"
+        ],
+        "next_effective_transition_from": attributes[
+            "next_effective_transition_from"
+        ],
+        "next_effective_transition_to": attributes["next_effective_transition_to"],
+        "next_handover_direction": attributes["next_handover_direction"],
+        "next_time_with_me": attributes["next_time_with_me"],
+        "next_time_leaving_me": attributes["next_time_leaving_me"],
+        "handover_occurrence_id": coordinator.active_handover_id,
+        "handover_note": coordinator.active_handover_note,
         "holiday_status": {"source": coordinator.holiday_provider.source},
         "fallback_holidays": [dict(item) for item in coordinator.fallback_holidays],
         "date_overrides": dict(sorted(model.state.date_overrides.items())),
@@ -261,4 +291,73 @@ async def websocket_set_party_colors(
     await coordinator.async_set_party_colors(
         msg[CONF_PARTY_A_COLOR], msg[CONF_PARTY_B_COLOR]
     )
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/handover_note/set",
+        vol.Required("entry_id"): str,
+        vol.Required("occurrence_id"): str,
+        vol.Required("note"): vol.All(str, vol.Length(max=HANDOVER_NOTE_MAX_LENGTH)),
+    }
+)
+@websocket_api.async_response
+async def websocket_set_handover_note(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Add, edit, or remove the private note for the upcoming handover."""
+    coordinator = _coordinators(hass).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"
+        )
+        return
+    try:
+        await coordinator.async_set_handover_note(
+            msg["occurrence_id"], msg["note"]
+        )
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_note", str(err))
+        return
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/temporary_change/set",
+        vol.Required("entry_id"): str,
+        vol.Required("party"): vol.In([PARTY_A, PARTY_B]),
+        vol.Required("start"): cv.date,
+        vol.Required("end"): cv.date,
+        vol.Optional("replace_dates"): vol.All(cv.ensure_list, [cv.date]),
+    }
+)
+@websocket_api.async_response
+async def websocket_set_temporary_change(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Apply the panel's temporary schedule change workflow."""
+    coordinator = _coordinators(hass).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], websocket_api.ERR_NOT_FOUND, "Schedule not found"
+        )
+        return
+    try:
+        await coordinator.async_set_temporary_change(
+            msg["start"],
+            msg["end"],
+            msg["party"],
+            msg.get("replace_dates"),
+        )
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_range", str(err))
+        return
     connection.send_result(msg["id"])
