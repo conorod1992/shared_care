@@ -222,14 +222,12 @@ def test_next_transition_skips_override_joining_same_normal_party() -> None:
 def test_override_joining_normal_period_does_not_swallow_manual_delay() -> None:
     model = make_model()
 
-    # Party B has the final days before its normal period begins.
     model.set_temporary_change(
         date(2026, 8, 1),
         date(2026, 8, 2),
         PARTY_B,
     )
 
-    # Explicitly delay the normal 3 Aug 18:00 handover until 5 Aug 18:00.
     delayed = datetime(2026, 8, 5, 18, 0, tzinfo=TZ)
     model.set_override(
         delayed,
@@ -238,8 +236,6 @@ def test_override_joining_normal_period_does_not_swallow_manual_delay() -> None:
 
     override_end = datetime(2026, 8, 3, 0, 0, tzinfo=TZ)
 
-    # Once the date override ends, the delayed handover still takes precedence,
-    # so ownership returns to Party A until the delayed handover occurs.
     assert model.actual_party_at(
         datetime(2026, 8, 4, 12, 0, tzinfo=TZ)
     ) == PARTY_A
