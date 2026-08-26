@@ -1,7 +1,7 @@
 # Shared Schedule
 
 A Home Assistant custom integration for a simple alternating shared-care
-schedule. It keeps the recurring cadence separate from public-holiday changes
+schedule. It keeps the recurring pattern separate from public-holiday changes
 and one-off overrides, so exceptions never silently move the series.
 
 ## Install
@@ -33,13 +33,13 @@ The setup form asks for:
 
 The reference date must match the chosen weekday. If the reference date is in
 the past when the integration is first created, the first future occurrence on
-that cadence is used. After that, the next base occurrence and current party are
+that pattern is used. After that, the next base occurrence and current party are
 stored by the integration and restored across restarts.
 
 The care-subject display name is presentation-only and can be edited later in
 the integration options. Existing entries that predate this option continue to
 load unchanged and use neutral “care subject” wording until a value is set.
-Party names, current state, cadence, overrides, notes, and the configured
+Party names, current state, recurring schedule, overrides, notes, and the configured
 **my party** value are never inferred from or replaced by the subject name.
 
 ## Entities
@@ -48,7 +48,7 @@ For a schedule named **Example Schedule**, Home Assistant creates a device with:
 
 - `sensor.example_schedule_status` — state is the **actual current owner**,
   including a date override applying today. Its attributes include the
-  `scheduled_current_party` cadence owner, `actual_current_party`, `with_me`,
+  `scheduled_current_party` scheduled owner, `actual_current_party`, `with_me`,
   `next_time_with_me`, `next_time_leaving_me`, `next_handover_direction`, and
   the base, holiday-adjusted, overridden, and effective dates;
 - `sensor.example_schedule_next_handover` — timestamp of the effective handover;
@@ -88,7 +88,7 @@ data:
 `shared_schedule.complete_handover` switches party immediately, clears an
 override, and advances exactly one base occurrence.
 
-To intentionally establish a new cadence, use:
+To intentionally establish a new recurring pattern, use:
 
 ```yaml
 action: shared_schedule.shift_series
@@ -108,24 +108,24 @@ connection; it does not run or expose a separate web server.
 
 The top of the **Schedule** view answers where the configured care subject is
 now, what happens next, and when from the configured **my party** perspective.
-Normal cadence details remain available as secondary information. A private
+Normal schedule details remain available as secondary information. A private
 note can be attached to the upcoming handover occurrence; it is bounded to 500
 characters, stored locally in Home Assistant, and discarded when that
 occurrence completes.
 
 The temporary schedule change wizard applies one party to a selected date
 range, previews every affected date, and explicitly leaves the recurring
-cadence unchanged afterwards. Existing overrides in the range are replaced,
+schedule unchanged afterwards. Existing overrides in the range are replaced,
 dates already assigned to that party are not stored redundantly, and the
 resulting group can be edited or removed from **Overrides**.
 
 The view also shows six weeks of normal ownership. Choose a party and select one
 date, or two endpoints for a contiguous range. Dates already belonging to that
-party on the normal cadence are disabled. Existing exceptions are outlined and
+party on the normal schedule are disabled. Existing exceptions are outlined and
 can be removed or changed by selecting them.
 
 Date overrides apply only to the selected ISO calendar dates. They do not alter
-the recurring cadence, public-holiday adjustment, or the separate next-handover
+the recurring schedule, public-holiday adjustment, or the separate next-handover
 override. Redundant overrides are not stored when the selected party already
 owns the date normally. The **Overrides** view groups upcoming exceptions for
 quick editing or deletion. The **Settings** view summarizes the useful schedule

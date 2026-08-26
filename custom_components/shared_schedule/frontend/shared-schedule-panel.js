@@ -346,7 +346,7 @@ class SharedSchedulePanel extends HTMLElement {
       ["Party A", settings.party_a],
       ["Party B", settings.party_b],
       ["My party", schedule.my_party_name],
-      ["Care subject", schedule.subject_name || "Not configured (neutral fallback)"],
+      ["Care subject display name", schedule.subject_name || "Not configured — edit integration options to set a display name."],
       ["Recurrence", `Every ${settings.recurrence_weeks} week${settings.recurrence_weeks === 1 ? "" : "s"}`],
       ["Handover time", settings.handover_time],
       ["Holiday country", settings.country],
@@ -358,7 +358,7 @@ class SharedSchedulePanel extends HTMLElement {
       <dl>${rows
         .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
         .join("")}</dl>
-      <button class="primary" data-action="open-settings">Open integration settings</button>
+      <button class="primary" data-action="open-settings">Edit integration settings</button>
     </section>
     <section class="card colour-card">
       <div><h2>Party colours</h2><p>Colours support the party names and ownership labels; they are never the only indicator.</p></div>
@@ -457,7 +457,7 @@ class SharedSchedulePanel extends HTMLElement {
     const sentenceSubject = schedule.subject_name || "The care subject";
     return `<section class="care-overview card">
       <div class="subject-now"><span>Where is ${escapeHtml(questionSubject)} now?</span><h2>${escapeHtml(sentenceSubject)} is with ${escapeHtml(schedule.actual_current_party_name)}</h2>
-        <small>Actual current owner${schedule.actual_current_party !== schedule.scheduled_current_party ? ` · scheduled cadence owner is ${escapeHtml(schedule.scheduled_current_party_name)}` : ""}</small></div>
+        <small>Actual current owner${schedule.actual_current_party !== schedule.scheduled_current_party ? ` · normal schedule says ${escapeHtml(schedule.scheduled_current_party_name)}` : ""}</small></div>
       <div class="subject-next"><span>What happens next?</span><h2>${escapeHtml(direction)}</h2>
         <strong>${escapeHtml(formatDateTime(schedule.next_effective_transition))}</strong>
         <em>${escapeHtml(relativeTime(schedule.next_effective_transition))}</em>
@@ -471,10 +471,10 @@ class SharedSchedulePanel extends HTMLElement {
             : `<button class="secondary" data-action="edit-note">Add note</button>`}
       </div>
       <details class="handover-details"><summary>Normal and effective handover details</summary>
-        <dl><div><dt>Scheduled/current cadence owner</dt><dd>${escapeHtml(schedule.scheduled_current_party_name)}</dd></div>
+        <dl><div><dt>Scheduled owner</dt><dd>${escapeHtml(schedule.scheduled_current_party_name)}</dd></div>
           <div><dt>Normal holiday-adjusted handover</dt><dd>${escapeHtml(formatDateTime(schedule.normal_handover))}</dd></div>
-          <div><dt>Effective cadence handover</dt><dd>${escapeHtml(formatDateTime(schedule.effective_handover))}</dd></div></dl>
-        <small>${effectiveDiffers ? "A manual handover override is active." : "The cadence handover has no manual override."}</small>
+          <div><dt>Current planned handover</dt><dd>${escapeHtml(formatDateTime(schedule.effective_handover))}</dd></div></dl>
+        <small>${effectiveDiffers ? "A manual handover override is active." : "The normal handover has not been changed manually."}</small>
       </details>
     </section>`;
   }

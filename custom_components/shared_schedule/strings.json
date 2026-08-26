@@ -9,7 +9,7 @@
           "name": "Schedule name",
           "party_a": "Party A display name",
           "party_b": "Party B display name",
-          "current_party": "Scheduled/current cadence owner",
+          "current_party": "Scheduled owner",
           "my_party": "Which party represents me",
           "subject_name": "Care subject display name (optional)",
           "anchor_date": "Reference handover date",
