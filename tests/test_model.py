@@ -236,17 +236,28 @@ def test_override_joining_normal_period_does_not_swallow_manual_delay() -> None:
         datetime(2026, 8, 1, 12, 0, tzinfo=TZ),
     )
 
-    # The temporary date override ends at midnight on 3 Aug, but the explicit
-    # delayed handover must still take precedence.
-    before_delayed_handover = datetime(2026, 8, 4, 12, 0, tzinfo=TZ)
+    override_end = datetime(2026, 8, 3, 0, 0, tzinfo=TZ)
 
-    assert model.actual_party_at(before_delayed_handover) == PARTY_A
+    # Once the date override ends, the delayed handover still takes precedence,
+    # so ownership returns to Party A until the delayed handover occurs.
+    assert model.actual_party_at(
+        datetime(2026, 8, 4, 12, 0, tzinfo=TZ)
+    ) == PARTY_A
 
-    transition = model.next_actual_transition(
+    first_transition = model.next_actual_transition(
         datetime(2026, 8, 1, 12, 0, tzinfo=TZ)
     )
+    assert first_transition == {
+        "datetime": override_end,
+        "from_party": PARTY_B,
+        "to_party": PARTY_A,
+        "source": "date_override",
+    }
 
-    assert transition == {
+    second_transition = model.next_actual_transition(
+        override_end + timedelta(microseconds=1)
+    )
+    assert second_transition == {
         "datetime": delayed,
         "from_party": PARTY_A,
         "to_party": PARTY_B,
