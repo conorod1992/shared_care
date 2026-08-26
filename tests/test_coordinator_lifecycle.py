@@ -1,8 +1,12 @@
 """Focused coordinator tests for occurrence-scoped state and events."""
 
+import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from custom_components.shared_schedule.const import (
     EVENT_HANDOVER_COMPLETED,
@@ -95,3 +99,25 @@ def test_offline_date_override_boundary_emits_once_on_restart() -> None:
     assert data["to_party_key"] == PARTY_A
     assert data["source"] == "date_override"
     assert data["reconciled_after_downtime"] is True
+
+
+def test_invalid_temporary_edit_preserves_existing_overrides() -> None:
+    coordinator = make_coordinator()
+    existing_dates = [BASE.date() + timedelta(days=1), BASE.date() + timedelta(days=2)]
+    coordinator.model.set_date_overrides(existing_dates, PARTY_A)
+    original = dict(coordinator.model.state.date_overrides)
+    coordinator._lock = asyncio.Lock()
+    coordinator._async_commit = AsyncMock()
+
+    with pytest.raises(ValueError, match="end date must not be before start date"):
+        asyncio.run(
+            coordinator.async_set_temporary_change(
+                BASE.date() + timedelta(days=5),
+                BASE.date() + timedelta(days=4),
+                PARTY_B,
+                replace_values=existing_dates,
+            )
+        )
+
+    assert coordinator.model.state.date_overrides == original
+    coordinator._async_commit.assert_not_awaited()

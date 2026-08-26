@@ -476,10 +476,11 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
     ) -> None:
         """Apply a temporary date range and report one meaningful change."""
         async with self._lock:
+            values = self.model.temporary_change_dates(start, end, party)
             previous = dict(self.model.state.date_overrides)
             if replace_values:
                 self.model.remove_date_overrides(replace_values)
-            values = self.model.set_temporary_change(start, end, party)
+            self.model.set_date_overrides(values, party)
             await self._async_commit()
             if previous != self.model.state.date_overrides:
                 self._fire_schedule_change(

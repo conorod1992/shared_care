@@ -10,7 +10,7 @@ and one-off overrides, so exceptions never silently move the series.
 
 1. In HACS, open **Integrations**, select the three-dot menu, and choose
    **Custom repositories**.
-2. Copy this repository's URL from the browser and add it with the category
+2. Add `https://github.com/conorod1992/shared_care` with the category
    **Integration**.
 3. Download **Shared Schedule**, restart Home Assistant, then add it from
    **Settings → Devices & services → Add integration**.

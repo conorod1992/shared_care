@@ -257,14 +257,22 @@ class ScheduleModel:
             else:
                 self.state.date_overrides[key] = party
 
-    def set_temporary_change(self, start: date, end: date, party: str) -> list[date]:
-        """Apply a temporary owner range without moving the recurrence."""
+    def temporary_change_dates(
+        self, start: date, end: date, party: str
+    ) -> list[date]:
+        """Validate and return the dates for a temporary owner range."""
+        if party not in (PARTY_A, PARTY_B):
+            raise ValueError("party must be 'a' or 'b'")
         if end < start:
             raise ValueError("end date must not be before start date")
-        values = [
+        return [
             start + timedelta(days=offset)
             for offset in range((end - start).days + 1)
         ]
+
+    def set_temporary_change(self, start: date, end: date, party: str) -> list[date]:
+        """Apply a temporary owner range without moving the recurrence."""
+        values = self.temporary_change_dates(start, end, party)
         self.set_date_overrides(values, party)
         return values
 
