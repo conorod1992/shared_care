@@ -202,6 +202,65 @@ def test_date_override_can_be_the_next_time_with_me() -> None:
     assert attributes["next_effective_transition_source"] == "date_override"
 
 
+def test_next_transition_skips_override_joining_same_normal_party() -> None:
+    model = make_model()
+    model.set_temporary_change(date(2026, 8, 1), date(2026, 8, 2), PARTY_B)
+    boundary = datetime(2026, 8, 3, 0, 0, tzinfo=TZ)
+
+    assert model.actual_party_at(boundary - timedelta(microseconds=1)) == PARTY_B
+    assert model.actual_party_at(boundary + timedelta(microseconds=1)) == PARTY_B
+
+    transition = model.next_actual_transition(datetime(2026, 8, 1, 12, 0, tzinfo=TZ))
+    assert transition == {
+        "datetime": datetime(2026, 8, 17, 18, 0, tzinfo=TZ),
+        "from_party": PARTY_B,
+        "to_party": PARTY_A,
+        "source": "normal",
+    }
+
+
+def test_override_joining_normal_period_does_not_swallow_manual_delay() -> None:
+    model = make_model()
+
+    model.set_temporary_change(
+        date(2026, 8, 1),
+        date(2026, 8, 2),
+        PARTY_B,
+    )
+
+    delayed = datetime(2026, 8, 5, 18, 0, tzinfo=TZ)
+    model.set_override(
+        delayed,
+        datetime(2026, 8, 1, 12, 0, tzinfo=TZ),
+    )
+
+    override_end = datetime(2026, 8, 3, 0, 0, tzinfo=TZ)
+
+    assert model.actual_party_at(
+        datetime(2026, 8, 4, 12, 0, tzinfo=TZ)
+    ) == PARTY_A
+
+    first_transition = model.next_actual_transition(
+        datetime(2026, 8, 1, 12, 0, tzinfo=TZ)
+    )
+    assert first_transition == {
+        "datetime": override_end,
+        "from_party": PARTY_B,
+        "to_party": PARTY_A,
+        "source": "date_override",
+    }
+
+    second_transition = model.next_actual_transition(
+        override_end + timedelta(microseconds=1)
+    )
+    assert second_transition == {
+        "datetime": delayed,
+        "from_party": PARTY_A,
+        "to_party": PARTY_B,
+        "source": "manual_override",
+    }
+
+
 def test_temporary_change_uses_only_date_overrides() -> None:
     model = make_model()
     original_base = model.base_handover

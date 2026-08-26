@@ -1,6 +1,6 @@
 set_handover_override:
   name: Set handover override
-  description: Move only the next handover without changing the recurring cadence.
+  description: Move only the next handover without changing the recurring schedule.
   target:
     entity:
       integration: shared_schedule
@@ -49,7 +49,7 @@ complete_handover:
 
 shift_series:
   name: Shift recurring series
-  description: Intentionally replace the next base occurrence and recurring cadence anchor.
+  description: Intentionally replace the next base occurrence and recurring schedule anchor.
   target:
     entity:
       integration: shared_schedule
