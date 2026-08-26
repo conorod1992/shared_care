@@ -166,25 +166,49 @@ class ScheduleModel:
         raise ValueError("value is too far beyond the active schedule")
 
     def actual_party_at(self, value: datetime) -> str:
-        """Return the current owner, including date overrides that join a period."""
+        """Return the actual owner, including date overrides."""
         override_party = self.state.date_overrides.get(value.date().isoformat())
         if override_party is not None:
             return override_party
 
         scheduled_party = self.scheduled_party_at(value)
         normal_party = self.normal_party_for_date(value.date())
+
+        # Find the first date of this normal ownership period.
         period_start = value.date()
         while (
             self.normal_party_for_date(period_start - timedelta(days=1))
             == normal_party
         ):
             period_start -= timedelta(days=1)
+
         previous_override = self.state.date_overrides.get(
             (period_start - timedelta(days=1)).isoformat()
         )
-        if previous_override is not None and previous_override == normal_party:
-            return previous_override
-        return scheduled_party
+
+        if previous_override is None or previous_override != normal_party:
+            return scheduled_party
+
+        # A date override can flow directly into the same party's normal period,
+        # avoiding a false handover at midnight / the normal handover time.
+        #
+        # Do not do this when that occurrence has actually been delayed by a
+        # public-holiday adjustment or manual handover override: those effective
+        # handover rules must continue to take precedence.
+        interval_days = self.settings.interval.days
+        period_offset = (
+            period_start - self.base_handover.date()
+        ).days // interval_days
+        period_base = self.base_handover + period_offset * self.settings.interval
+        period_effective = self._effective_handover_for_base(
+            period_base,
+            first=period_offset == 0,
+        )
+
+        if period_effective != period_base:
+            return scheduled_party
+
+        return previous_override
 
     def next_actual_transition(self, now: datetime) -> dict[str, object]:
         """Return the next effective ownership transition after ``now``.
