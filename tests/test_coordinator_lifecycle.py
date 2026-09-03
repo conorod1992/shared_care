@@ -41,6 +41,8 @@ def make_coordinator() -> SharedScheduleCoordinator:
         ScheduleState(PARTY_A, BASE),
         lambda value: False,
     )
+    coordinator.holiday_provider = lambda value: False
+    coordinator._settings = lambda: coordinator.model.settings
     coordinator.handover_notes = {}
     coordinator._emitted_handover_ids = []
     coordinator.entry = SimpleNamespace(entry_id="test-entry")
@@ -88,7 +90,7 @@ def test_offline_date_override_boundary_emits_once_on_restart() -> None:
     coordinator.model.set_date_overrides([override_date], PARTY_A)
     restarted = datetime(2026, 8, 2, 1, 0, tzinfo=TZ)
 
-    transitions = coordinator.model.actual_transitions_between(stopped, restarted)
+    transitions = coordinator._actual_transitions_between(stopped, restarted)
     coordinator._emit_offline_date_override_transitions(transitions)
     coordinator._emit_offline_date_override_transitions(transitions)
 
@@ -99,6 +101,39 @@ def test_offline_date_override_boundary_emits_once_on_restart() -> None:
     assert data["to_party_key"] == PARTY_A
     assert data["source"] == "date_override"
     assert data["reconciled_after_downtime"] is True
+
+
+def test_due_handover_replay_is_not_truncated_at_100() -> None:
+    coordinator = make_coordinator()
+
+    due = coordinator._due_handovers(BASE + timedelta(weeks=208))
+
+    assert len(due) == 105
+    assert due[0]["occurrence_id"] == BASE.isoformat()
+    assert due[-1]["occurrence_id"] == (BASE + timedelta(weeks=208)).isoformat()
+
+
+def test_offline_transition_replay_is_not_truncated_at_100() -> None:
+    coordinator = make_coordinator()
+
+    class DenseTransitionModel:
+        @staticmethod
+        def next_actual_transition(cursor: datetime) -> dict[str, object]:
+            when = cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            return {
+                "datetime": when,
+                "from_party": PARTY_A,
+                "to_party": PARTY_B,
+                "source": "date_override",
+            }
+
+    coordinator.model = DenseTransitionModel()
+    end = BASE + timedelta(hours=150)
+
+    transitions = coordinator._actual_transitions_between(BASE, end)
+
+    assert len(transitions) == 150
+    assert transitions[-1]["datetime"] == end
 
 
 def test_invalid_temporary_edit_preserves_existing_overrides() -> None:
