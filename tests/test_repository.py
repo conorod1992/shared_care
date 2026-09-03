@@ -79,7 +79,7 @@ def test_subject_name_is_optional_and_exposed_to_the_panel() -> None:
     assert '"subject_name": subject_name' in panel_api
 
 
-def test_frontend_relative_time_uses_local_calendar_days() -> None:
+def test_frontend_calendar_dates_use_home_assistant_timezone() -> None:
     panel = (
         ROOT
         / "custom_components"
@@ -87,5 +87,22 @@ def test_frontend_relative_time_uses_local_calendar_days() -> None:
         / "frontend"
         / "shared-schedule-panel.js"
     ).read_text(encoding="utf-8")
-    assert "localCalendarDay(value) - localCalendarDay(new Date())" in panel
+    assert "isoDateInTimeZone" in panel
+    assert "this._hass.config.time_zone" in panel
+    assert "start: calendarStart(this._today)" in panel
+    assert "value >= this._today" in panel
+    assert "const today = this._today" in panel
+    assert "day.date === this._today" in panel
+
+
+def test_frontend_relative_time_uses_home_assistant_calendar_days() -> None:
+    panel = (
+        ROOT
+        / "custom_components"
+        / "shared_schedule"
+        / "frontend"
+        / "shared-schedule-panel.js"
+    ).read_text(encoding="utf-8")
+    assert "const targetDate = isoDateInTimeZone(new Date(value), timeZone)" in panel
+    assert "localCalendarDay(parseDate(targetDate)) - localCalendarDay(parseDate(today))" in panel
     assert "Math.ceil" not in panel

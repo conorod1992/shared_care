@@ -17,9 +17,19 @@ const isoDate = (value) => {
   return `${year}-${month}-${day}`;
 };
 
-const calendarStart = () => {
-  const value = new Date();
-  value.setHours(12, 0, 0, 0);
+const isoDateInTimeZone = (value, timeZone) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
+const calendarStart = (today) => {
+  const value = parseDate(today);
   value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
   return isoDate(value);
 };
@@ -41,10 +51,11 @@ const localCalendarDay = (value) => {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
 };
 
-const relativeTime = (value) => {
+const relativeTime = (value, today, timeZone) => {
+  const targetDate = isoDateInTimeZone(new Date(value), timeZone);
   const days = Math.max(
     0,
-    localCalendarDay(value) - localCalendarDay(new Date()),
+    localCalendarDay(parseDate(targetDate)) - localCalendarDay(parseDate(today)),
   );
   if (days === 0) return "today";
   if (days === 1) return "in 1 day";
@@ -92,6 +103,10 @@ class SharedSchedulePanel extends HTMLElement {
     return this._hass.connection.sendMessagePromise(message);
   }
 
+  get _today() {
+    return isoDateInTimeZone(new Date(), this._hass.config.time_zone);
+  }
+
   async _load() {
     if (this._loading) return;
     this._loading = true;
@@ -100,7 +115,7 @@ class SharedSchedulePanel extends HTMLElement {
     try {
       const response = await this._call({
         type: "shared_schedule/get",
-        start: calendarStart(),
+        start: calendarStart(this._today),
         days: 42,
       });
       this._data = response.schedules;
@@ -125,7 +140,7 @@ class SharedSchedulePanel extends HTMLElement {
 
   _calendarDay(day) {
     const selected = this._selected.has(day.date);
-    const today = day.date === isoDate(new Date());
+    const today = day.date === this._today;
     const normalMatches = day.normal_party === this._party;
     const disabled = this._party && normalMatches && !day.overridden;
     const classes = ["day", this._partyClass(day.party)];
@@ -178,7 +193,7 @@ class SharedSchedulePanel extends HTMLElement {
     const schedule = this._schedule;
     if (!schedule) return [];
     const dates = Object.entries(schedule.date_overrides)
-      .filter(([value]) => value >= isoDate(new Date()))
+      .filter(([value]) => value >= this._today)
       .sort(([left], [right]) => left.localeCompare(right));
     const groups = [];
     for (const [value, party] of dates) {
@@ -254,7 +269,7 @@ class SharedSchedulePanel extends HTMLElement {
   }
 
   _temporaryChangeWizard(schedule) {
-    const today = isoDate(new Date());
+    const today = this._today;
     const first = schedule.calendar.find((day) => day.date >= today)?.date;
     const last = schedule.calendar.at(-1)?.date;
     const preview = this._temporaryPreview;
@@ -460,7 +475,7 @@ class SharedSchedulePanel extends HTMLElement {
         <small>Actual current owner${schedule.actual_current_party !== schedule.scheduled_current_party ? ` · normal schedule says ${escapeHtml(schedule.scheduled_current_party_name)}` : ""}</small></div>
       <div class="subject-next"><span>What happens next?</span><h2>${escapeHtml(direction)}</h2>
         <strong>${escapeHtml(formatDateTime(schedule.next_effective_transition))}</strong>
-        <em>${escapeHtml(relativeTime(schedule.next_effective_transition))}</em>
+        <em>${escapeHtml(relativeTime(schedule.next_effective_transition, this._today, this._hass.config.time_zone))}</em>
         <small>${escapeHtml(explanation)}</small></div>
       <div class="handover-note">
         <span>Private handover note</span>
