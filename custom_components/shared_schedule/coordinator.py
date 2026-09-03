@@ -212,7 +212,7 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             )
         self.model = ScheduleModel(self._settings(), state, self.holiday_provider)
         offline_transitions = (
-            self.model.actual_transitions_between(self._last_actual_observed, now)
+            self._actual_transitions_between(self._last_actual_observed, now)
             if self._last_actual_party is not None
             and self._last_actual_observed is not None
             else []
@@ -264,8 +264,25 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
             return "public_holiday"
         return "normal"
 
+    def _actual_transitions_between(
+        self, start: datetime, end: datetime
+    ) -> list[dict[str, object]]:
+        """Return every actual transition crossed during a bounded interval."""
+        if end <= start:
+            return []
+        transitions: list[dict[str, object]] = []
+        cursor = start
+        while cursor < end:
+            transition = self.model.next_actual_transition(cursor)
+            when = transition["datetime"]
+            if when > end:
+                break
+            transitions.append(transition)
+            cursor = when + timedelta(microseconds=1)
+        return transitions
+
     def _due_handovers(self, now: datetime) -> list[dict[str, object]]:
-        """Describe due occurrences before reconciliation mutates the model."""
+        """Describe every due occurrence before reconciliation mutates the model."""
         state = ScheduleState(
             current_party=self.model.state.current_party,
             next_base=self.model.state.next_base,
@@ -274,10 +291,8 @@ class SharedScheduleCoordinator(DataUpdateCoordinator[dict[str, object]]):
         )
         probe = ScheduleModel(self._settings(), state, self.holiday_provider)
         due: list[dict[str, object]] = []
-        for _ in range(100):
+        while probe.effective_handover <= now:
             effective = probe.effective_handover
-            if effective > now:
-                break
             occurrence_id = probe.base_handover.isoformat()
             from_party = probe.actual_party_at(effective - timedelta(microseconds=1))
             to_party = probe.actual_party_at(effective)
